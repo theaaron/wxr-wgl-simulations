@@ -1,3 +1,4 @@
+import { indices, positions, vertices } from "./cube.js";
 const VS_SOURCE = `
             attribute vec4 a_position;
             uniform mat4 u_projectionMatrix;
@@ -50,6 +51,7 @@ const VS_SOURCE = `
         let xrReferenceSpace = null;
         let program = null;
         let triangleBuffer = null;
+        let cubeBuffer = null;
         let positionAttrib = null;
         let vrButton = null;
         let statusDiv = null;
@@ -87,15 +89,25 @@ const VS_SOURCE = `
             program.projectionMatrixUniform = gl.getUniformLocation(program, 'u_projectionMatrix');
             program.viewMatrixUniform = gl.getUniformLocation(program, 'u_viewMatrix');
 
-            const vertices = new Float32Array([
-                0.0, 0.5, -2.0,  
-               -0.5, -0.5, -2.0,
-                0.5, -0.5, -2.0 
-            ]);
+            // const vertices = new Float32Array([
+            //     0.0, 0.5, -2.0,  
+            //    -0.5, -0.5, -2.0,
+            //     0.5, -0.5, -2.0 
+            // ]);
             
-            triangleBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            // triangleBuffer
+            // triangleBuffer = gl.createBuffer();
+            // gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+            // gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+            // cube buffer
+            cubeBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW)
+
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer)
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW)
             
             gl.clearColor(0.1, 0.1, 0.2, 1.0);
             gl.enable(gl.DEPTH_TEST);
@@ -111,10 +123,10 @@ const VS_SOURCE = `
             gl.uniformMatrix4fv(program.projectionMatrixUniform, false, view.projectionMatrix);
             gl.uniformMatrix4fv(program.viewMatrixUniform, false, view.transform.inverse.matrix);
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+            gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
             gl.vertexAttribPointer(positionAttrib, 3, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(positionAttrib);
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
         }
 
         function onXRFrame(time, frame) {
