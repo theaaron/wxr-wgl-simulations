@@ -121,14 +121,14 @@ function onSessionStarted(session, isImmersive) {
         xrSession.end();
     }
     xrSession = session;
-    console.log(`${isImmersive ? 'Immersive VR' : 'Inline'} session started.`);
     
     session.addEventListener('end', onSessionEnded);
     vrButton.textContent = isImmersive ? 'Exit VR' : 'Enter VR';
     
     gl.makeXRCompatible().then(() => {
+        const xrLayer = new XRWebGLLayer(session, gl);
         session.updateRenderState({
-            baseLayer: new XRWebGLLayer(session, gl)
+            baseLayer: xrLayer
         });
 
         const spaceType = isImmersive ? 'local-floor' : 'viewer';
@@ -137,6 +137,9 @@ function onSessionStarted(session, isImmersive) {
             xrReferenceSpace = referenceSpace;
             session.requestAnimationFrame(onXRFrame);
         });
+    }).catch(e => {
+        console.error("Failed to make WebGL context XR compatible or create layer:", e);
+        session.end();
     });
 }
 
