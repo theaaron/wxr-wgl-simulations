@@ -168,7 +168,7 @@ async function onVRButtonClick() {
     
     try {
         const session = await navigator.xr.requestSession('immersive-vr', {
-            requiredFeatures: ['local-floor'] 
+            requiredFeatures: ['local'] 
         });
         onSessionStarted(session, true);
     } catch (error) {
