@@ -6,3 +6,9 @@ body {
     min-height: 100vh;
     background-color: #7889bd;
 }
+
+#vr-button {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+}
