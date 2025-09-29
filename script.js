@@ -121,6 +121,8 @@ function onSessionStarted(session, isImmersive) {
         xrSession.end();
     }
     xrSession = session;
+    xrReferenceSpace = null;
+    frameCount = 0;
     
     session.addEventListener('end', onSessionEnded);
     vrButton.textContent = isImmersive ? 'Exit VR' : 'Enter VR';
@@ -131,7 +133,8 @@ function onSessionStarted(session, isImmersive) {
             baseLayer: xrLayer
         });
 
-        const spaceType = isImmersive ? 'local-floor' : 'viewer';
+        debugLog(`XR Layer framebuffer size: ${xrLayer.framebufferWidth}x${xrLayer.framebufferHeight}`, 'info');
+        const spaceType = isImmersive ? 'local' : 'viewer';
         
         session.requestReferenceSpace(spaceType).then(referenceSpace => {
             xrReferenceSpace = referenceSpace;
