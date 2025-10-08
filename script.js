@@ -60,9 +60,27 @@ function createFramebuffer(gl, depthTexture, colorTexture) {
 let gl = null;
 let xrSession = null;
 let xrReferenceSpace = null;
+
 let program = null;
+let blendProgram = null;
+
 // let triangleBuffer = null;
 let cubeBuffer = null;
+let indexBuffer = null;
+let instanceBuffer = null;
+let instanceCount = 0;
+let quadBuffer = null;
+
+let drawBuffersExt = null;
+let instancingExt = null;
+
+let depthTextures = [];
+let colorTextures = [];
+let frameBuffers = [];
+
+const PEELING_PASSES = 4;
+const ALPHA = 0.5;
+
 let positionAttrib = null;
 let vrButton = null;
 let statusDiv = null;
