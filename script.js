@@ -1,5 +1,5 @@
 import { cubeSize, indices, vertices } from "./cube.js";
-import { FS_SOURCE, VS_SOURCE } from "./shaders.js";
+import { FS_SOURCE, VS_SOURCE, PEEL_FS, PEEL_VS, BLEND_FS, BLEND_VS } from "./shaders.js";
 
 function compileShader(gl, source, type) {
     const shader = gl.createShader(type);
@@ -106,6 +106,20 @@ function initGL() {
         return false;
     }
 
+    drawBuffersExt = gl.getExtension('WEBGL_draw_buffers');
+    if(!drawBuffersExt) {
+        updateStatus('WEBGL_draw_buffers not supported. falling back')
+    }
+
+    instancingExt = gl.getExtension('ANGLE_instanced_arrays');
+    if (!instancingExt) {
+        updateStatus('Instanced rendering not supported.')
+        return false
+    }
+
+    peelProgram = createProgram(gl, PEEL_VS, PEEL_FS);
+    blendProgram = createProgram(gl, BLEND_VS, BLEND_FS)
+
     program = createProgram(gl, VS_SOURCE, FS_SOURCE);
     if (!program) {
         updateStatus('Failed to create shader program');
@@ -118,17 +132,6 @@ function initGL() {
     program.instancePositionAttrib = gl.getAttribLocation(program, 'a_instancePosition')
     program.projectionMatrixUniform = gl.getUniformLocation(program, 'u_projectionMatrix');
     program.viewMatrixUniform = gl.getUniformLocation(program, 'u_viewMatrix');
-
-    // const vertices = new Float32Array([
-    //     0.0, 0.5, -2.0,  
-    //    -0.5, -0.5, -2.0,
-    //     0.5, -0.5, -2.0 
-    // ]);
-    
-    // triangleBuffer
-    // triangleBuffer = gl.createBuffer();
-    // gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
-    // gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
     // cube buffer
     cubeBuffer = gl.createBuffer();
