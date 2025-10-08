@@ -1,4 +1,4 @@
-import { indices, vertices } from "./cube.js";
+import { cubeSize, indices, vertices } from "./cube.js";
 import { FS_SOURCE, VS_SOURCE } from "./shaders.js";
 
 function compileShader(gl, source, type) {
@@ -31,11 +31,37 @@ function createProgram(gl, vsSource, fsSource) {
     return program;
 }
 
+function createTexture(gl, width, height, format) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2d(gl.TEXTURE_2D, 0, format, width, height, 0, format, type, null)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    return texture
+}
+
+function createFramebuffer(gl, depthTexture, colorTexture) {
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, depthTexture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + 1, gl.TEXTURE_2D, colorTexture, 0);
+    
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('Framebuffer incomplete:', status);
+    }
+    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return fb;
+}
+
 let gl = null;
 let xrSession = null;
 let xrReferenceSpace = null;
 let program = null;
-let triangleBuffer = null;
+// let triangleBuffer = null;
 let cubeBuffer = null;
 let positionAttrib = null;
 let vrButton = null;
@@ -97,14 +123,21 @@ function initGL() {
 
 
     /// CREATING INSTANCES
-    const instanceCount = 100;
+    const instanceCount = 1000;
     const instancePositions = new Float32Array(instanceCount * 3);
     let idx = 0;
     for (let x = 0; x < 10; x++) {
-        for (let z = 0; z < 10; z++) {
-            instancePositions[idx++] = (x - 4.5) * 2
-            instancePositions[idx++] = 0;
-            instancePositions[idx++] = (z - 4.5) * 2 - 5
+        for (let y = 0; y < 10; y++) {
+            for (let z = 0; z < 10; z++) {
+                const dx = x - 1.25, dy = y - 1.25, dz = z - 1.25;
+                const distSq = dx*dx + dy*dy + dz*dz;
+                if (distSq < 2.5*2.5) {
+                    instancePositions[idx++] = (x) * cubeSize
+                    instancePositions[idx++] = (y) * cubeSize
+                    instancePositions[idx++] = (z) * cubeSize - 3
+                }
+
+            }
         }
     }
 
@@ -152,7 +185,8 @@ function drawScene(view) {
     gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
     gl.vertexAttribPointer(positionAttrib, 3, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(positionAttrib);
-    
+    program.instanceExt.vertexAttribDivisorANGLE(positionAttrib, 0);
+
     gl.bindBuffer(gl.ARRAY_BUFFER, program.instanceBuffer);
     gl.vertexAttribPointer(program.instancePositionAttrib, 3, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(program.instancePositionAttrib);

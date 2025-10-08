@@ -44,17 +44,17 @@ export const faceColors = [
   [1.0, 1.0, 0.0, 1.0],  
   [1.0, 0.0, 1.0, 1.0],  
 ];
-
+export const cubeSize = 0.125;
 export const vertices = new Float32Array([
     // 8 corners of the cube
-    -0.5, -0.5,  0.5,  // 0: front-bottom-left
-     0.5, -0.5,  0.5,  // 1: front-bottom-right
-     0.5,  0.5,  0.5,  // 2: front-top-right
-    -0.5,  0.5,  0.5,  // 3: front-top-left
-    -0.5, -0.5, -0.5,  // 4: back-bottom-left
-     0.5, -0.5, -0.5,  // 5: back-bottom-right
-     0.5,  0.5, -0.5,  // 6: back-top-right
-    -0.5,  0.5, -0.5   // 7: back-top-left
+    -cubeSize, -cubeSize,  cubeSize,  // 0: front-bottom-left
+     cubeSize, -cubeSize,  cubeSize,  // 1: front-bottom-right
+     cubeSize,  cubeSize,  cubeSize,  // 2: front-top-right
+    -cubeSize,  cubeSize,  cubeSize,  // 3: front-top-left
+    -cubeSize, -cubeSize, -cubeSize,  // 4: back-bottom-left
+     cubeSize, -cubeSize, -cubeSize,  // 5: back-bottom-right
+     cubeSize,  cubeSize, -cubeSize,  // 6: back-top-right
+    -cubeSize,  cubeSize, -cubeSize   // 7: back-top-left
 ]);
 
 export const indices = new Uint16Array([
