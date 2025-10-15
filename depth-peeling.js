@@ -1,3 +1,4 @@
+//depth-peeling.js
 import { cubeSize, indices, vertices } from "./cube.js";
 
 // ============================================================================
@@ -145,7 +146,7 @@ function createProgram(gl, vsSource, fsSource) {
 }
 
 function createTexture(gl, width, height, format, type) {
-    // Ensure integer dimensions
+
     width = Math.floor(width);
     height = Math.floor(height);
     
@@ -169,14 +170,12 @@ function createFramebuffer(gl, depthTexture, colorTexture) {
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
     
-    // Verify textures have dimensions
     if (!depthTexture.width || !colorTexture.width) {
         console.error('Textures missing dimensions:', depthTexture.width, colorTexture.width);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         return null;
     }
     
-    // Attach depth texture to first color attachment
     gl.framebufferTexture2D(
         gl.FRAMEBUFFER, 
         drawBuffersExt.COLOR_ATTACHMENT0_WEBGL, 
@@ -185,7 +184,6 @@ function createFramebuffer(gl, depthTexture, colorTexture) {
         0
     );
     
-    // Attach color texture to second color attachment
     gl.framebufferTexture2D(
         gl.FRAMEBUFFER, 
         drawBuffersExt.COLOR_ATTACHMENT1_WEBGL, 
@@ -194,7 +192,6 @@ function createFramebuffer(gl, depthTexture, colorTexture) {
         0
     );
     
-    // Need a depth buffer for depth testing
     const depthBuffer = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, depthTexture.width, depthTexture.height);
@@ -219,23 +216,19 @@ let gl = null;
 let xrSession = null;
 let xrReferenceSpace = null;
 
-// Programs
 let peelProgram = null;
 let simpleProgram = null;
 let blendProgram = null;
 
-// Geometry
 let cubeBuffer = null;
 let indexBuffer = null;
 let instanceBuffer = null;
 let instanceCount = 0;
 let quadBuffer = null;
 
-// Extensions
 let drawBuffersExt = null;
 let instancingExt = null;
 
-// Peeling textures - one set per eye
 let leftEyeTextures = {
     depthTextures: [],
     colorTextures: [],
@@ -248,11 +241,9 @@ let rightEyeTextures = {
     framebuffers: []
 };
 
-// Settings
-const NUM_PASSES = 4; // Number of peeling passes
-const ALPHA = 0.8; // Transparency level
+const NUM_PASSES = 4; 
+const ALPHA = 0.8; 
 
-// UI
 let vrButton = null;
 let statusDiv = null;
 
@@ -296,7 +287,7 @@ function initGL() {
         peelProgram = createProgram(gl, PEEL_VS, PEEL_FS);
         if (!peelProgram) {
             updateStatus('Failed to create peel program - trying fallback');
-            drawBuffersExt = null; // Force fallback
+            drawBuffersExt = null; 
         } else {
             updateStatus('Depth peeling program created successfully');
         }
@@ -615,7 +606,7 @@ function onXRFrame(time, frame) {
     const glLayer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     
-    gl.clearColor(0.2, 0.2, 0.2, 1);
+    gl.clearColor(0.8, 0.8, 0.8, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
     for (const view of pose.views) {
