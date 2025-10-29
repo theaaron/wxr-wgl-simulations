@@ -1,4 +1,4 @@
-//shaders.js
+
 export const VS_SOURCE = `
     attribute vec4 a_position;
     attribute vec3 a_instancePosition;
@@ -17,7 +17,6 @@ export const FS_SOURCE = `
     precision mediump float;
     varying vec3 v_worldPosition;
     void main() {
-        // Normalize position to 0-1 range for color
         vec3 color = v_worldPosition * 0.1 + 0.5;
         gl_FragColor = vec4(color, 1.0);
     }
@@ -40,8 +39,7 @@ export const PEEL_VS = `
         gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
         
         v_position = worldPos.xyz;
-        v_normal = a_position; // Cube normals are just the positions (centered at origin)
-    }
+        v_normal = a_position;
 `;
 
 export const PEEL_FS = `
@@ -110,6 +108,7 @@ export const BLEND_FS = `
 export const APPROX_VS = `
     attribute vec3 a_position;
     attribute vec3 a_instancePosition;
+    attribute vec3 a_color;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
@@ -117,6 +116,7 @@ export const APPROX_VS = `
     
     varying vec3 v_position;
     varying vec3 v_normal;
+    varying vec3 v_color;
     varying float v_depth;
     
     void main() {
@@ -127,7 +127,7 @@ export const APPROX_VS = `
         
         v_position = worldPos.xyz;
         v_normal = a_position;
-        // Linearized depth for weighting
+        v_color = a_color;
         v_depth = clipPos.z / clipPos.w * 0.5 + 0.5;
     }
 `;
@@ -137,9 +137,11 @@ export const APPROX_FS = `
     precision highp float;
     
     uniform float u_alpha;
+    uniform int u_useVertexColor;
     
     varying vec3 v_position;
     varying vec3 v_normal;
+    varying vec3 v_color;
     varying float v_depth;
     
     void main() {
@@ -148,19 +150,22 @@ export const APPROX_FS = `
         vec3 normal = normalize(v_normal);
         float diff = max(dot(normal, lightDir), 0.0) * 0.6 + 0.4;
         
-        // Color based on position
-        vec3 color = abs(normalize(v_position)) * diff;
+        // Color: use vertex color if available, otherwise position-based
+        vec3 color;
+        if (u_useVertexColor == 1) {
+            color = v_color * diff;
+        } else {
+            color = abs(normalize(v_position)) * diff;
+        }
         
-        // Weight function: favors closer, more opaque fragments
-        // Adjusted to prevent over-brightening
-        float weight = u_alpha * max(0.01, 50000.0 * pow(1.0 - v_depth, 3.0));
+        // Weight function - reduced multiplier to handle dense overlapping
+        float weight = clamp(pow(u_alpha, 2.0) * 1000.0 * pow(1.0 - v_depth, 3.0), 1e-2, 3e3);
         
-        // Accumulation buffer: weighted premultiplied color
-        // Key fix: don't multiply color by alpha again here
-        gl_FragData[0] = vec4(color * u_alpha * weight, u_alpha * weight);
+        // Accumulation buffer: color * alpha * weight
+        gl_FragData[0] = vec4(color * u_alpha, u_alpha) * weight;
         
-        // Revealage buffer: accumulate transparency
-        // Using proper revealage formula: multiply (1-alpha) values
+        // Revealage buffer: accumulate alpha
+        // With additive blending, this sums up the coverage
         gl_FragData[1] = vec4(u_alpha);
     }
 `;
@@ -187,20 +192,21 @@ export const APPROX_COMPOSITE_FS = `
         vec4 accum = texture2D(u_accumTexture, v_texCoord);
         float reveal = texture2D(u_revealTexture, v_texCoord).r;
         
-        // Avoid division by zero
-        if (accum.a < 0.00001) {
-            discard;
+        // Suppress overflow
+        float maxVal = max(abs(accum.r), max(abs(accum.g), abs(accum.b)));
+        if (maxVal > 1e10) {
+            accum = vec4(accum.a);
         }
         
-        // Weighted average
-        vec3 avgColor = accum.rgb / accum.a;
+        // Prevent divide by zero
+        vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
         
-        // Clamp to prevent over-brightening
-        avgColor = clamp(avgColor, 0.0, 1.0);
+        // reveal contains sum of alpha values
+        // Use exponential falloff to maintain alpha responsiveness even with many layers
+        // This approximates: 1 - (1-alpha)^N where N is the number of layers
+        // exp(-reveal * factor) gives us smooth transparency control
+        float transparency = exp(-reveal * 2.0);
         
-        // Composite with proper alpha
-        gl_FragColor = vec4(avgColor, 1.0 - reveal);
+        gl_FragColor = vec4(avgColor, 1.0 - transparency);
     }
 `;
-
-//////
