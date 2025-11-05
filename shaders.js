@@ -22,6 +22,60 @@ export const FS_SOURCE = `
     }
 `;
 
+export const SIMPLE_VS = `
+    attribute vec3 a_position;
+    attribute vec3 a_instancePosition;
+    attribute vec3 a_color;
+    
+    uniform mat4 u_projectionMatrix;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    uniform float u_cubeScale;
+    
+    varying vec3 v_position;
+    varying vec3 v_normal;
+    varying vec3 v_color;
+    
+    void main() {
+        // Scale the cube vertex, then add the instance position
+        vec3 scaledCubeVertex = a_position * u_cubeScale;
+        vec3 pos = scaledCubeVertex + a_instancePosition;
+        vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
+        gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
+        
+        v_position = worldPos.xyz;
+        v_normal = a_position;
+        v_color = a_color;
+    }
+`;
+
+export const SIMPLE_FS = `
+    precision highp float;
+    
+    uniform int u_useVertexColor;
+    
+    varying vec3 v_position;
+    varying vec3 v_normal;
+    varying vec3 v_color;
+    
+    void main() {
+        // Simple lighting
+        vec3 lightDir = normalize(vec3(0.5, 0.5, -1.0));
+        vec3 normal = normalize(v_normal);
+        float diff = max(dot(normal, lightDir), 0.0) * 0.6 + 0.4;
+        
+        // Color: use vertex color if available, otherwise position-based
+        vec3 color;
+        if (u_useVertexColor == 1) {
+            color = v_color * diff;
+        } else {
+            color = abs(normalize(v_position)) * diff;
+        }
+        
+        gl_FragColor = vec4(color, 0.3); // Semi-transparent
+    }
+`;
+
 export const PEEL_VS = `
     attribute vec3 a_position;
     attribute vec3 a_instancePosition;
