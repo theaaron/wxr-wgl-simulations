@@ -113,6 +113,7 @@ export const APPROX_VS = `
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
+    uniform float u_cubeScale;
     
     varying vec3 v_position;
     varying vec3 v_normal;
@@ -120,7 +121,9 @@ export const APPROX_VS = `
     varying float v_depth;
     
     void main() {
-        vec3 pos = a_position + a_instancePosition;
+        // Scale the cube vertex, then add the instance position
+        vec3 scaledCubeVertex = a_position * u_cubeScale;
+        vec3 pos = scaledCubeVertex + a_instancePosition;
         vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
         vec4 clipPos = u_projectionMatrix * u_viewMatrix * worldPos;
         gl_Position = clipPos;
@@ -162,7 +165,8 @@ export const APPROX_FS = `
         float weight = clamp(pow(u_alpha, 2.0) * 1000.0 * pow(1.0 - v_depth, 3.0), 1e-2, 3e3);
         
         // Accumulation buffer: color * alpha * weight
-        gl_FragData[0] = vec4(color * u_alpha, u_alpha) * weight;
+        // gl_FragData[0] = vec4(color * u_alpha, u_alpha) * weight;
+        gl_FragData[0] = vec4(color, u_alpha) * weight;
         
         // Revealage buffer: accumulate alpha
         // With additive blending, this sums up the coverage
@@ -180,6 +184,37 @@ export const APPROX_COMPOSITE_VS = `
     }
 `;
 
+// export const APPROX_COMPOSITE_FS = `
+//     precision highp float;
+    
+//     uniform sampler2D u_accumTexture;
+//     uniform sampler2D u_revealTexture;
+    
+//     varying vec2 v_texCoord;
+    
+//     void main() {
+//         vec4 accum = texture2D(u_accumTexture, v_texCoord);
+//         float reveal = texture2D(u_revealTexture, v_texCoord).r;
+        
+//         // Suppress overflow
+//         float maxVal = max(abs(accum.r), max(abs(accum.g), abs(accum.b)));
+//         if (maxVal > 1e10) {
+//             accum = vec4(accum.a);
+//         }
+        
+//         // Prevent divide by zero
+//         vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
+        
+//         // reveal contains sum of alpha values
+//         // Use exponential falloff to maintain alpha responsiveness even with many layers
+//         // This approximates: 1 - (1-alpha)^N where N is the number of layers
+//         // exp(-reveal * factor) gives us smooth transparency control
+//         float transparency = exp(-reveal * 0.2);
+        
+//         gl_FragColor = vec4(avgColor, 1.0 - transparency);
+//     }
+// `;
+
 export const APPROX_COMPOSITE_FS = `
     precision highp float;
     
@@ -192,21 +227,23 @@ export const APPROX_COMPOSITE_FS = `
         vec4 accum = texture2D(u_accumTexture, v_texCoord);
         float reveal = texture2D(u_revealTexture, v_texCoord).r;
         
-        // Suppress overflow
         float maxVal = max(abs(accum.r), max(abs(accum.g), abs(accum.b)));
         if (maxVal > 1e10) {
             accum = vec4(accum.a);
         }
         
-        // Prevent divide by zero
         vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
         
-        // reveal contains sum of alpha values
-        // Use exponential falloff to maintain alpha responsiveness even with many layers
-        // This approximates: 1 - (1-alpha)^N where N is the number of layers
-        // exp(-reveal * factor) gives us smooth transparency control
-        float transparency = exp(-reveal * 2.0);
+        float layerDarkening = pow(0.85, reveal * 10.0); // Adjust the 5.0 multiplier
+        vec3 finalColor = avgColor * layerDarkening;
         
-        gl_FragColor = vec4(avgColor, 1.0 - transparency);
+        float transparency = exp(-reveal * 0.2);
+        float alpha = 1.0 - transparency;
+        
+        vec3 backgroundColor = vec3(0.7, 0.7, 0.85);
+        
+        vec3 blendedColor = mix(backgroundColor, finalColor, alpha);
+        
+        gl_FragColor = vec4(blendedColor, 1.0);
     }
 `;
