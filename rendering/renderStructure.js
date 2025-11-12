@@ -1,8 +1,9 @@
 import { loadStructure } from './loadStructure.js';
 
 export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, projMatrix, viewMatrix, modelMatrix, program) {
+
     if (!renderStructure.cachedStructure) {
-        path = './resources/atria_64x64x64.json';
+        path = 'resources/13-350um-192x192x192_lra_grid.json';
         try {
             renderStructure.cachedStructure = await loadStructure(path);
             const struct = renderStructure.cachedStructure;
@@ -45,8 +46,26 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
     const alphaLoc = gl.getUniformLocation(program, 'u_alpha');
     const useVertexColorLoc = gl.getUniformLocation(program, 'u_useVertexColor');
     
+    // PHONG: Get lighting uniform locations
+    const lightDirLoc = gl.getUniformLocation(program, 'u_lightDirection');
+    const lightColorLoc = gl.getUniformLocation(program, 'u_lightColor');
+    const lightAmbientLoc = gl.getUniformLocation(program, 'u_lightAmbient');
+    const lightSpecularLoc = gl.getUniformLocation(program, 'u_lightSpecular');
+    const matAmbientLoc = gl.getUniformLocation(program, 'u_materialAmbient');
+    const matSpecularLoc = gl.getUniformLocation(program, 'u_materialSpecular');
+    const shininessLoc = gl.getUniformLocation(program, 'u_shininess');
+    
     gl.uniformMatrix4fv(projLoc, false, projMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
+    
+    // PHONG: Set lighting uniforms - reduced specular to prevent blown-out highlights
+    if (lightDirLoc !== null) gl.uniform3f(lightDirLoc, 0.5, 0.5, -1.0);
+    if (lightColorLoc !== null) gl.uniform3f(lightColorLoc, 1.0, 1.0, 1.0);
+    if (lightAmbientLoc !== null) gl.uniform3f(lightAmbientLoc, 0.6, 0.6, 0.6);
+    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.3, 0.3, 0.3);  // Reduced from 0.8
+    if (matAmbientLoc !== null) gl.uniform3f(matAmbientLoc, 1.0, 1.0, 1.0);
+    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.2, 0.2, 0.2);  // Reduced from 0.5
+    if (shininessLoc !== null) gl.uniform1f(shininessLoc, 32.0);
     
 
     const globalScale = 0.02; 
@@ -88,11 +107,26 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         structurePositions[i * 3 + 1] = voxel.y - centerY;
         structurePositions[i * 3 + 2] = voxel.z - centerZ;
         
-        // Color: normalize voxel value to 0-1 range and create color gradient
-        const normalizedValue = voxel.value / 255.0;
-        structureColors[i * 3] = normalizedValue; // Red based on value
-        structureColors[i * 3 + 1] = 0.5 + normalizedValue * 0.5; // Green
-        structureColors[i * 3 + 2] = 1.0 - normalizedValue * 0.5; // Blue
+        // DISTINCT COLORS: Assign red, green, or blue based on spatial regions
+        // This makes it VERY obvious if transparency is working
+        const relativeZ = voxel.z / structure.dimensions.nz; // 0-1 range
+        
+        if (relativeZ < 0.33) {
+            // Front third: RED
+            structureColors[i * 3] = 1.0;
+            structureColors[i * 3 + 1] = 0.0;
+            structureColors[i * 3 + 2] = 0.0;
+        } else if (relativeZ < 0.66) {
+            // Middle third: GREEN
+            structureColors[i * 3] = 0.0;
+            structureColors[i * 3 + 1] = 1.0;
+            structureColors[i * 3 + 2] = 0.0;
+        } else {
+            // Back third: BLUE
+            structureColors[i * 3] = 0.0;
+            structureColors[i * 3 + 1] = 0.0;
+            structureColors[i * 3 + 2] = 1.0;
+        }
     }
     
     // this is just to log the first few pos/cols for debugging

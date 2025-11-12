@@ -37,7 +37,6 @@ export const SIMPLE_VS = `
     varying vec3 v_color;
     
     void main() {
-        // Scale the cube vertex, then add the instance position
         vec3 scaledCubeVertex = a_position * u_cubeScale;
         vec3 pos = scaledCubeVertex + a_instancePosition;
         vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
@@ -53,26 +52,48 @@ export const SIMPLE_FS = `
     precision highp float;
     
     uniform int u_useVertexColor;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    
+    // light properties
+    uniform vec3 u_lightDirection;
+    uniform vec3 u_lightColor;
+    uniform vec3 u_lightAmbient;
+    uniform vec3 u_lightSpecular;
+    
+    // material properties
+    uniform vec3 u_materialAmbient;
+    uniform vec3 u_materialSpecular;
+    uniform float u_shininess;
     
     varying vec3 v_position;
     varying vec3 v_normal;
     varying vec3 v_color;
     
     void main() {
-        // Simple lighting
-        vec3 lightDir = normalize(vec3(0.5, 0.5, -1.0));
-        vec3 normal = normalize(v_normal);
-        float diff = max(dot(normal, lightDir), 0.0) * 0.6 + 0.4;
+        vec3 N = normalize(v_normal);
+        vec3 E = normalize(-v_position);
+        vec3 L = normalize(u_lightDirection);
+        vec3 R = reflect(L, N);
+        float lambertTerm = dot(N, -L);
         
-        // Color: use vertex color if available, otherwise position-based
-        vec3 color;
-        if (u_useVertexColor == 1) {
-            color = v_color * diff;
-        } else {
-            color = abs(normalize(v_position)) * diff;
+        vec3 materialColor = (u_useVertexColor == 1) ? v_color : abs(normalize(v_position));
+        
+        // ambient
+        vec3 Ia = u_lightAmbient * u_materialAmbient * materialColor;
+        
+        // diffuse + specular
+        vec3 Id = vec3(0.0);
+        vec3 Is = vec3(0.0);
+        if (lambertTerm > 0.0) {
+            Id = u_lightColor * materialColor * lambertTerm;
+            float specular = pow(max(dot(R, E), 0.0), u_shininess);
+            Is = u_lightSpecular * u_materialSpecular * specular;
         }
         
-        gl_FragColor = vec4(color, 0.3); // Semi-transparent
+        vec3 finalColor = Ia + Id + Is;
+        
+        gl_FragColor = vec4(finalColor, 1.0);
     }
 `;
 
@@ -108,31 +129,24 @@ export const PEEL_FS = `
     varying vec3 v_normal;
     
     void main() {
-        // Calculate screen coordinates
         vec2 screenCoord = gl_FragCoord.xy / u_screenSize;
-        
-        // Read previous depth
         float prevDepth = texture2D(u_depthTexture, screenCoord).r;
-        
-        // Current fragment depth
         float currDepth = gl_FragCoord.z;
         
-        // Depth peeling: discard if at or in front of previous layer
+        // depth peeling - discard if at or in front of previous layer
         if (u_pass > 0 && currDepth <= prevDepth + 0.0001) {
             discard;
         }
         
-        // Simple lighting
+        // simple lighting
         vec3 lightDir = normalize(vec3(0.5, 0.5, -1.0));
         vec3 normal = normalize(v_normal);
         float diff = max(dot(normal, lightDir), 0.0) * 0.6 + 0.4;
         
-        // Color based on position (rainbow cube effect)
         vec3 color = abs(normalize(v_position)) * diff;
         
-        // Output depth and color
-        gl_FragData[0] = vec4(currDepth, 0.0, 0.0, 1.0); // Depth
-        gl_FragData[1] = vec4(color, u_alpha); // Color with alpha
+        gl_FragData[0] = vec4(currDepth, 0.0, 0.0, 1.0);
+        gl_FragData[1] = vec4(color, u_alpha);
     }
 `;
 
@@ -175,7 +189,6 @@ export const APPROX_VS = `
     varying float v_depth;
     
     void main() {
-        // Scale the cube vertex, then add the instance position
         vec3 scaledCubeVertex = a_position * u_cubeScale;
         vec3 pos = scaledCubeVertex + a_instancePosition;
         vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
@@ -195,6 +208,19 @@ export const APPROX_FS = `
     
     uniform float u_alpha;
     uniform int u_useVertexColor;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    
+    // light properties
+    uniform vec3 u_lightDirection;
+    uniform vec3 u_lightColor;
+    uniform vec3 u_lightAmbient;
+    uniform vec3 u_lightSpecular;
+    
+    // material properties
+    uniform vec3 u_materialAmbient;
+    uniform vec3 u_materialSpecular;
+    uniform float u_shininess;
     
     varying vec3 v_position;
     varying vec3 v_normal;
@@ -202,29 +228,41 @@ export const APPROX_FS = `
     varying float v_depth;
     
     void main() {
-        // Simple lighting
-        vec3 lightDir = normalize(vec3(0.5, 0.5, -1.0));
-        vec3 normal = normalize(v_normal);
-        float diff = max(dot(normal, lightDir), 0.0) * 0.6 + 0.4;
+        vec3 N = normalize(v_normal);
+        vec3 E = normalize(-v_position);
+        vec3 L = normalize(u_lightDirection);
+        vec3 R = reflect(L, N);
+        float lambertTerm = dot(N, -L);
         
-        // Color: use vertex color if available, otherwise position-based
-        vec3 color;
-        if (u_useVertexColor == 1) {
-            color = v_color * diff;
-        } else {
-            color = abs(normalize(v_position)) * diff;
+        vec3 materialColor = (u_useVertexColor == 1) ? v_color : abs(normalize(v_position));
+        
+        // ambient
+        vec3 Ia = u_lightAmbient * u_materialAmbient * materialColor;
+        
+        // diffuse + specular
+        vec3 Id = vec3(0.0);
+        vec3 Is = vec3(0.0);
+        if (lambertTerm > 0.0) {
+            Id = u_lightColor * materialColor * lambertTerm;
+            float specular = pow(max(dot(R, E), 0.0), u_shininess);
+            Is = u_lightSpecular * u_materialSpecular * specular;
         }
         
-        // Weight function - reduced multiplier to handle dense overlapping
-        float weight = clamp(pow(u_alpha, 2.0) * 1000.0 * pow(1.0 - v_depth, 3.0), 1e-2, 3e3);
+        vec3 finalColor = Ia + Id + Is;
         
-        // Accumulation buffer: color * alpha * weight
-        // gl_FragData[0] = vec4(color * u_alpha, u_alpha) * weight;
-        gl_FragData[0] = vec4(color, u_alpha) * weight;
+        // depth-based weight for OIT
+        float z = v_depth;
+        float weight = u_alpha * max(0.01, 3000.0 * pow(1.0 - z, 3.0));
         
-        // Revealage buffer: accumulate alpha
-        // With additive blending, this sums up the coverage
-        gl_FragData[1] = vec4(u_alpha);
+        // pre-multiply alpha for light absorption through layers
+        vec3 premultColor = finalColor * u_alpha;
+        
+        // accumulate weighted color
+        gl_FragData[0] = vec4(premultColor * weight, u_alpha * weight);
+        
+        // accumulate transmittance
+        float transmittance = 1.0 - u_alpha;
+        gl_FragData[1] = vec4(transmittance, 0.0, 0.0, 0.0);
     }
 `;
 
@@ -238,37 +276,6 @@ export const APPROX_COMPOSITE_VS = `
     }
 `;
 
-// export const APPROX_COMPOSITE_FS = `
-//     precision highp float;
-    
-//     uniform sampler2D u_accumTexture;
-//     uniform sampler2D u_revealTexture;
-    
-//     varying vec2 v_texCoord;
-    
-//     void main() {
-//         vec4 accum = texture2D(u_accumTexture, v_texCoord);
-//         float reveal = texture2D(u_revealTexture, v_texCoord).r;
-        
-//         // Suppress overflow
-//         float maxVal = max(abs(accum.r), max(abs(accum.g), abs(accum.b)));
-//         if (maxVal > 1e10) {
-//             accum = vec4(accum.a);
-//         }
-        
-//         // Prevent divide by zero
-//         vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
-        
-//         // reveal contains sum of alpha values
-//         // Use exponential falloff to maintain alpha responsiveness even with many layers
-//         // This approximates: 1 - (1-alpha)^N where N is the number of layers
-//         // exp(-reveal * factor) gives us smooth transparency control
-//         float transparency = exp(-reveal * 0.2);
-        
-//         gl_FragColor = vec4(avgColor, 1.0 - transparency);
-//     }
-// `;
-
 export const APPROX_COMPOSITE_FS = `
     precision highp float;
     
@@ -279,25 +286,34 @@ export const APPROX_COMPOSITE_FS = `
     
     void main() {
         vec4 accum = texture2D(u_accumTexture, v_texCoord);
-        float reveal = texture2D(u_revealTexture, v_texCoord).r;
+        float sumTransmittance = texture2D(u_revealTexture, v_texCoord).r;
         
-        float maxVal = max(abs(accum.r), max(abs(accum.g), abs(accum.b)));
-        if (maxVal > 1e10) {
-            accum = vec4(accum.a);
+        if (accum.a < 0.001) {
+            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+            return;
         }
         
+        // recover average color
         vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
         
-        float layerDarkening = pow(0.85, reveal * 10.0); // Adjust the 5.0 multiplier
-        vec3 finalColor = avgColor * layerDarkening;
+        // unused for now, might use later for better transparency
+        float avgTransmittance = sumTransmittance / max(accum.a, 0.00001);
         
-        float transparency = exp(-reveal * 0.2);
-        float alpha = 1.0 - transparency;
+        // calculate opacity - more layers = more opaque
+        float absorption = 1.0 - exp(-accum.a * 2.5);
+        float opacity = clamp(absorption, 0.0, 1.0);
         
-        vec3 backgroundColor = vec3(0.7, 0.7, 0.85);
+        // darken based on number of layers
+        float darkening = exp(-accum.a * 0.2);
+        vec3 darkenedColor = avgColor * darkening;
         
-        vec3 blendedColor = mix(backgroundColor, finalColor, alpha);
+        // at high alpha, skip darkening to preserve color
+        if (accum.a > 10.0) {
+            darkenedColor = avgColor;
+        }
         
-        gl_FragColor = vec4(blendedColor, 1.0);
+        vec3 finalColor = mix(vec3(1.0), darkenedColor, opacity);
+        
+        gl_FragColor = vec4(finalColor, 1.0);
     }
 `;

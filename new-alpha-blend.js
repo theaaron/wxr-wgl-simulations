@@ -102,7 +102,7 @@ let rightEyeApproxTextures = {
     framebuffer: null
 };
 
-const ALPHA = 1.0; 
+const ALPHA = 0.5;  
 let vrButton = null;
 let statusDiv = null;
 
@@ -342,7 +342,7 @@ function setupApproxTextures(textureSet, width, height) {
 // ============================================================================
 
 async function drawSceneWithApproxBlending(view) {
-    const goOpaque = false; 
+    const goOpaque = false;  // ALPHA BLEND: Enable approximate alpha blending
     const viewport = xrSession.renderState.baseLayer.getViewport(view);
     const width = Math.floor(viewport.width);
     const height = Math.floor(viewport.height);
@@ -375,7 +375,8 @@ async function drawSceneWithApproxBlending(view) {
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
 
-    const path = 'resources/atria_64x64x64.json';
+    // const path = 'resources/atria_64x64x64.json';
+    const path = 'resources/13-350um-192x192x192_lra_grid.json';
     const program = simpleProgram || approxProgram;
     await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
     
@@ -407,7 +408,8 @@ async function drawSceneWithApproxBlending(view) {
     
     gl.enable(gl.BLEND);
     gl.blendEquation(gl.FUNC_ADD);
-    gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA); 
+    // ALPHA BLEND: Both color and alpha should be additive for weighted OIT
+    gl.blendFunc(gl.ONE, gl.ONE);
     
     gl.depthMask(false); 
     gl.enable(gl.DEPTH_TEST); 
