@@ -342,8 +342,8 @@ function setupApproxTextures(textureSet, width, height) {
 // XR FUNCTIONS
 // ============================================================================
 
-async function drawSceneWithApproxBlending(view) {
-    const goOpaque = false;  // ALPHA BLEND: Enable approximate alpha blending
+function drawSceneWithApproxBlending(view) {
+    const goOpaque = false;  
     const viewport = xrSession.renderState.baseLayer.getViewport(view);
     const width = Math.floor(viewport.width);
     const height = Math.floor(viewport.height);
@@ -376,10 +376,8 @@ async function drawSceneWithApproxBlending(view) {
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
 
-    // const PATH = 'resources/atria_64x64x64.json';
-    // const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
     const program = simpleProgram || approxProgram;
-    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
+    renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
     
     gl.disable(gl.SCISSOR_TEST);
     if (goOpaque) {
@@ -427,7 +425,7 @@ async function drawSceneWithApproxBlending(view) {
     
     gl.uniform1f(alphaLoc, ALPHA);
 
-    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, approxProgram);
+    renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, approxProgram);
     // drawDNAHelix(gl, instancingExt, 2000, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
     // drawHelixCubes(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, 100, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
     // drawHelix(gl, instancingExt, 2000, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
@@ -473,7 +471,7 @@ async function drawSceneWithApproxBlending(view) {
     gl.enable(gl.DEPTH_TEST);
 }
 
-async function onXRFrame(time, frame) {
+function onXRFrame(time, frame) {
     if (!xrSession) return;
     
     xrSession.requestAnimationFrame(onXRFrame);
@@ -487,7 +485,7 @@ async function onXRFrame(time, frame) {
     // moved viewport clearing to drawSceneWithApproxBlending
     
     for (const view of pose.views) {
-        await drawSceneWithApproxBlending(view);
+        drawSceneWithApproxBlending(view);
     }
 }
 

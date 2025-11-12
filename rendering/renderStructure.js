@@ -3,35 +3,30 @@ import { loadStructure } from './loadStructure.js';
 
 export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, projMatrix, viewMatrix, modelMatrix, program) {
 
-    // prevent race condition when both eyes try to load simultaneously
-    if (!renderStructure.cachedStructure) {
-        if (renderStructure.loading) {
-            // structure is being loaded by another eye, wait
-            await renderStructure.loading;
-        } else {
-            path = PATH
-            renderStructure.loading = (async () => {
-                try {
-                    renderStructure.cachedStructure = await loadStructure(path);
-                    const struct = renderStructure.cachedStructure;
-                    console.log(`Loaded ${struct.voxels.length} voxels`);
-                    console.log(`Grid dimensions: ${struct.dimensions.nx}×${struct.dimensions.ny}×${struct.dimensions.nz}`);
-                    console.log(`Sample voxels:`, struct.voxels.slice(0, 5));
-                    console.log(`First voxel coords: x=${struct.voxels[0].x}, y=${struct.voxels[0].y}, z=${struct.voxels[0].z}`);
-                    console.log(`Second voxel coords: x=${struct.voxels[1].x}, y=${struct.voxels[1].y}, z=${struct.voxels[1].z}`);
-                    console.log(`Rendering ${struct.voxels.length} cube instances`);
-                } catch (error) {
-                    console.error('Failed to load structure:', error);
-                    throw error;
-                }
-            })();
-            await renderStructure.loading;
+    // start loading if not already loading or loaded
+    if (!renderStructure.cachedStructure && !renderStructure.loading) {
+        path = PATH
+        console.log('Starting structure load...');
+        renderStructure.loading = loadStructure(path).then(struct => {
+            renderStructure.cachedStructure = struct;
             renderStructure.loading = null;
-        }
+            console.log(`Loaded ${struct.voxels.length} voxels`);
+            console.log(`Grid dimensions: ${struct.dimensions.nx}×${struct.dimensions.ny}×${struct.dimensions.nz}`);
+            console.log(`Sample voxels:`, struct.voxels.slice(0, 5));
+            console.log(`First voxel coords: x=${struct.voxels[0].x}, y=${struct.voxels[0].y}, z=${struct.voxels[0].z}`);
+            console.log(`Second voxel coords: x=${struct.voxels[1].x}, y=${struct.voxels[1].y}, z=${struct.voxels[1].z}`);
+            console.log(`Rendering ${struct.voxels.length} cube instances`);
+        }).catch(error => {
+            console.error('Failed to load structure:', error);
+            renderStructure.loading = null;
+        });
     }
     
+    // if still loading, return early - don't block the render loop
     const structure = renderStructure.cachedStructure;
-    if (!structure) return;
+    if (!structure) {
+        return; // data not ready yet, try again next frame
+    }
     const numCubes = structure.voxels.length;
     
     if (numCubes === 0) {
