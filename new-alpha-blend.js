@@ -352,8 +352,16 @@ function drawSceneWithApproxBlending(view) {
     
     if (width <= 0 || height <= 0) return;
     
-    const isLeftEye = view.eye === 'left';
+    // determine which eye based on viewport x position (left eye is x=0)
+    const isLeftEye = x === 0;
     const textureSet = isLeftEye ? leftEyeApproxTextures : rightEyeApproxTextures;
+    
+    // debug: log every 60 frames
+    if (!drawSceneWithApproxBlending.frameCount) drawSceneWithApproxBlending.frameCount = 0;
+    drawSceneWithApproxBlending.frameCount++;
+    if (drawSceneWithApproxBlending.frameCount % 60 === 0) {
+        console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
+    }
     
     const modelMatrix = new Float32Array([
         1, 0, 0, 0,
@@ -368,10 +376,9 @@ function drawSceneWithApproxBlending(view) {
     gl.scissor(x, y, width, height);
     gl.viewport(x, y, width, height);
     
-    gl.clearColor(1.0, 1.0, 1.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // framebuffer already cleared in onXRFrame - just set viewport
     
-    gl.disable(gl.BLEND); // Disable blending for opaque rendering
+    gl.disable(gl.BLEND);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
@@ -439,8 +446,7 @@ function drawSceneWithApproxBlending(view) {
     gl.scissor(x, y, width, height);
     gl.viewport(x, y, width, height);
     
-    gl.clearColor(1.0, 1.0, 1.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // don't clear - composite over the opaque pass we already rendered
     
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -482,7 +488,10 @@ function onXRFrame(time, frame) {
     const glLayer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     
-    // moved viewport clearing to drawSceneWithApproxBlending
+    // clear the ENTIRE framebuffer (both eyes) once at the start
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(1.0, 1.0, 1.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
     for (const view of pose.views) {
         drawSceneWithApproxBlending(view);
