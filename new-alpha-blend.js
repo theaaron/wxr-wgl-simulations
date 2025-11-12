@@ -484,9 +484,7 @@ async function onXRFrame(time, frame) {
     const glLayer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     
-
-    gl.clearColor(1.0, 1.0, 1.0, 1.0); //oopsie daisy forgot to clear
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
+    // moved viewport clearing to drawSceneWithApproxBlending
     
     for (const view of pose.views) {
         await drawSceneWithApproxBlending(view);
