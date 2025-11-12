@@ -391,6 +391,12 @@ function drawSceneWithApproxBlending(view) {
         return; 
     }
     
+    // if MRT extension not available, render opaquely only
+    if (!drawBuffersExt) {
+        console.warn('WEBGL_draw_buffers not available, rendering opaque only');
+        return;
+    }
+    
     const needsRecreation = !textureSet.accumTexture || 
                            textureSet.accumTexture.width !== width ||
                            textureSet.accumTexture.height !== height;
@@ -492,6 +498,13 @@ function onXRFrame(time, frame) {
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(1.0, 1.0, 1.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    
+    // debug: log view count every 60 frames
+    if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
+    onXRFrame.frameCount++;
+    if (onXRFrame.frameCount % 60 === 0) {
+        console.log(`onXRFrame: ${pose.views.length} views`);
+    }
     
     for (const view of pose.views) {
         drawSceneWithApproxBlending(view);
