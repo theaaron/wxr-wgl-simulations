@@ -8,7 +8,8 @@ import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
 
 
-
+export const PATH = 'resources/atria_64x64x64.json';
+    // const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -375,10 +376,10 @@ async function drawSceneWithApproxBlending(view) {
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
 
-    // const path = 'resources/atria_64x64x64.json';
-    const path = 'resources/13-350um-192x192x192_lra_grid.json';
+    // const PATH = 'resources/atria_64x64x64.json';
+    // const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
     const program = simpleProgram || approxProgram;
-    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
+    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
     
     gl.disable(gl.SCISSOR_TEST);
     if (goOpaque) {
@@ -426,7 +427,7 @@ async function drawSceneWithApproxBlending(view) {
     
     gl.uniform1f(alphaLoc, ALPHA);
 
-    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, approxProgram);
+    await renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, approxProgram);
     // drawDNAHelix(gl, instancingExt, 2000, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
     // drawHelixCubes(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, 100, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
     // drawHelix(gl, instancingExt, 2000, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);

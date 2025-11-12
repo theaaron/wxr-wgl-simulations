@@ -1,9 +1,10 @@
+import { PATH } from '../new-alpha-blend.js';
 import { loadStructure } from './loadStructure.js';
 
 export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, projMatrix, viewMatrix, modelMatrix, program) {
 
     if (!renderStructure.cachedStructure) {
-        path = 'resources/13-350um-192x192x192_lra_grid.json';
+        path = PATH
         try {
             renderStructure.cachedStructure = await loadStructure(path);
             const struct = renderStructure.cachedStructure;
