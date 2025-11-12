@@ -114,22 +114,21 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         structurePositions[i * 3 + 1] = voxel.y - centerY;
         structurePositions[i * 3 + 2] = voxel.z - centerZ;
         
-        // DISTINCT COLORS: Assign red, green, or blue based on spatial regions
-        // This makes it VERY obvious if transparency is working
+        // making it obvious if transparency is working
         const relativeZ = voxel.z / structure.dimensions.nz; // 0-1 range
         
         if (relativeZ < 0.33) {
-            // Front third: RED
-            structureColors[i * 3] = 1.0;
-            structureColors[i * 3 + 1] = 0.0;
-            structureColors[i * 3 + 2] = 0.0;
-        } else if (relativeZ < 0.66) {
-            // Middle third: GREEN
+            // front is red
             structureColors[i * 3] = 0.0;
-            structureColors[i * 3 + 1] = 1.0;
-            structureColors[i * 3 + 2] = 0.0;
+            structureColors[i * 3 + 1] = 0.0;
+            structureColors[i * 3 + 2] = 1.0;
+        } else if (relativeZ < 0.66) {
+            // middle is green
+            structureColors[i * 3] = 0.0;
+            structureColors[i * 3 + 1] = 0.0;
+            structureColors[i * 3 + 2] = 1.0;
         } else {
-            // Back third: BLUE
+            // back is blue /// CHANGING EVERYTHING TO BLUE FOR NOW -- CHANGE OTHER COLORS IF YOU WANT
             structureColors[i * 3] = 0.0;
             structureColors[i * 3 + 1] = 0.0;
             structureColors[i * 3 + 2] = 1.0;
