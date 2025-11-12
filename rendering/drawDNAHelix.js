@@ -12,8 +12,26 @@ export function drawDNAHelix(gl, instancingExt, numPoints, projMatrix, viewMatri
     const alphaLoc = gl.getUniformLocation(program, 'u_alpha');
     const useVertexColorLoc = gl.getUniformLocation(program, 'u_useVertexColor');
     
+    // PHONG: Get lighting uniform locations
+    const lightDirLoc = gl.getUniformLocation(program, 'u_lightDirection');
+    const lightColorLoc = gl.getUniformLocation(program, 'u_lightColor');
+    const lightAmbientLoc = gl.getUniformLocation(program, 'u_lightAmbient');
+    const lightSpecularLoc = gl.getUniformLocation(program, 'u_lightSpecular');
+    const matAmbientLoc = gl.getUniformLocation(program, 'u_materialAmbient');
+    const matSpecularLoc = gl.getUniformLocation(program, 'u_materialSpecular');
+    const shininessLoc = gl.getUniformLocation(program, 'u_shininess');
+    
     gl.uniformMatrix4fv(projLoc, false, projMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
+    
+    // PHONG: Set lighting uniforms - reduced specular to prevent blown-out highlights
+    if (lightDirLoc !== null) gl.uniform3f(lightDirLoc, 0.5, 0.5, -1.0);
+    if (lightColorLoc !== null) gl.uniform3f(lightColorLoc, 1.0, 1.0, 1.0);
+    if (lightAmbientLoc !== null) gl.uniform3f(lightAmbientLoc, 0.6, 0.6, 0.6);
+    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.3, 0.3, 0.3);  // Reduced from 0.8
+    if (matAmbientLoc !== null) gl.uniform3f(matAmbientLoc, 1.0, 1.0, 1.0);
+    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.2, 0.2, 0.2);  // Reduced from 0.5
+    if (shininessLoc !== null) gl.uniform1f(shininessLoc, 32.0);
     
     const modelMatrix = new Float32Array([
         1, 0, 0, 0,
