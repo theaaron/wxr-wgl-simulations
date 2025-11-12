@@ -136,9 +136,18 @@ function initGL() {
         return false;
     }
 
-    drawBuffersExt = gl.getExtension('WEBGL_draw_buffers');
-    if (!drawBuffersExt) {
-        updateStatus('WEBGL_draw_buffers not supported - using simple transparency');
+    // try both extension variants (Quest uses EXT version)
+    drawBuffersExt = gl.getExtension('WEBGL_draw_buffers') || gl.getExtension('EXT_draw_buffers');
+    if (drawBuffersExt) {
+        console.log('MRT extension found:', drawBuffersExt.constructor.name);
+        // normalize the API - EXT version uses different constant names
+        if (!drawBuffersExt.COLOR_ATTACHMENT0_WEBGL) {
+            drawBuffersExt.COLOR_ATTACHMENT0_WEBGL = drawBuffersExt.COLOR_ATTACHMENT0_EXT;
+            drawBuffersExt.COLOR_ATTACHMENT1_WEBGL = drawBuffersExt.COLOR_ATTACHMENT1_EXT;
+            drawBuffersExt.drawBuffersWEBGL = drawBuffersExt.drawBuffersEXT;
+        }
+    } else {
+        updateStatus('MRT not supported - using simple transparency');
     }
 
     instancingExt = gl.getExtension('ANGLE_instanced_arrays');
@@ -393,7 +402,10 @@ function drawSceneWithApproxBlending(view) {
     
     // if MRT extension not available, render opaquely only
     if (!drawBuffersExt) {
-        console.warn('WEBGL_draw_buffers not available, rendering opaque only');
+        if (!drawSceneWithApproxBlending.warnedOnce) {
+            console.warn('MRT extension not available, rendering opaque only');
+            drawSceneWithApproxBlending.warnedOnce = true;
+        }
         return;
     }
     
