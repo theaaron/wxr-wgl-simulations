@@ -49,7 +49,8 @@ function createInstanceDataTexture(gl, structure) {
     
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0,
+    // WebGL 2.0: Use sized internal format for float textures
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0,
                   gl.RGBA, gl.FLOAT, data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -77,6 +78,32 @@ function createInstanceIDBuffer(gl, numInstances) {
     return buffer;
 }
 
+function createPositionBuffer(gl, structure) {
+    // Calculate center of the voxel structure
+    const centerX = structure.dimensions.nx / 2;
+    const centerY = structure.dimensions.ny / 2;
+    const centerZ = structure.dimensions.nz / 2;
+    
+    // Create position data centered at origin
+    const positions = new Float32Array(structure.voxels.length * 3);
+    for (let i = 0; i < structure.voxels.length; i++) {
+        const voxel = structure.voxels[i];
+        positions[i * 3 + 0] = voxel.x - centerX;
+        positions[i * 3 + 1] = voxel.y - centerY;
+        positions[i * 3 + 2] = voxel.z - centerZ;
+    }
+    
+    // Create and populate buffer
+    renderStructure.positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    
+    // Also create color buffer (will be populated on first render)
+    renderStructure.colorBuffer = gl.createBuffer();
+    
+    console.log(`Created position buffer: ${structure.voxels.length} voxels, centered at (${centerX}, ${centerY}, ${centerZ})`);
+}
+
 // ============================================================================
 // MAIN RENDER FUNCTION
 // ============================================================================
@@ -97,10 +124,14 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
             console.log(`Second voxel coords: x=${struct.voxels[1].x}, y=${struct.voxels[1].y}, z=${struct.voxels[1].z}`);
             console.log(`Rendering ${struct.voxels.length} cube instances`);
             
-            // Create instance data texture for picking
+            // Create instance data texture and buffers for picking
             renderStructure.instanceDataTexture = createInstanceDataTexture(gl, struct);
             renderStructure.instanceIDBuffer = createInstanceIDBuffer(gl, struct.voxels.length);
-            console.log('✅ Instance data texture and ID buffer created for picking');
+            
+            // Create position buffer immediately for VR controller picking
+            createPositionBuffer(gl, struct);
+            
+            console.log('✅ Instance data texture, ID buffer, and position buffer created for picking');
         }).catch(error => {
             console.error('Failed to load structure:', error);
             renderStructure.loading = null;
@@ -154,9 +185,9 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
     if (lightDirLoc !== null) gl.uniform3f(lightDirLoc, 0.5, 0.5, -1.0);
     if (lightColorLoc !== null) gl.uniform3f(lightColorLoc, 1.0, 1.0, 1.0);
     if (lightAmbientLoc !== null) gl.uniform3f(lightAmbientLoc, 0.6, 0.6, 0.6);
-    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.3, 0.3, 0.3);  
+    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.0, 0.0, 0.0);  // No specular highlights
     if (matAmbientLoc !== null) gl.uniform3f(matAmbientLoc, 1.0, 1.0, 1.0);
-    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.2, 0.2, 0.2);  
+    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.0, 0.0, 0.0);  // No specular reflection
     if (shininessLoc !== null) gl.uniform1f(shininessLoc, 32.0);
     
 

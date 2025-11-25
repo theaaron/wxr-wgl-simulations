@@ -631,7 +631,6 @@ async function enterVR() {
         const session = await navigator.xr.requestSession('immersive-vr');
         xrSession = session;
         
-        // Setup VR controller input listeners
         setupControllerInput(session);
         
         updateStatus('VR session started');
