@@ -1,6 +1,67 @@
 import { PATH } from '../new-alpha-blend.js';
 import { loadStructure } from './loadStructure.js';
 
+// ============================================================================
+// HELPER FUNCTIONS FOR PICKING
+// ============================================================================
+
+// Track picked voxels for visual feedback
+const pickedVoxels = new Set();
+
+function createInstanceDataTexture(gl, structure) {
+    const numVoxels = structure.voxels.length;
+    
+    // Calculate texture dimensions (square texture)
+    const width = Math.ceil(Math.sqrt(numVoxels));
+    const height = Math.ceil(numVoxels / width);
+    
+    console.log(`Creating instance data texture: ${width}x${height} for ${numVoxels} voxels`);
+    
+    // RGBA float data: stores (x, y, z, value) for each instance
+    const data = new Float32Array(width * height * 4);
+    
+    for (let i = 0; i < numVoxels; i++) {
+        const voxel = structure.voxels[i];
+        data[i * 4 + 0] = voxel.x;
+        data[i * 4 + 1] = voxel.y;
+        data[i * 4 + 2] = voxel.z;
+        data[i * 4 + 3] = voxel.value;
+    }
+    
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0,
+                  gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    return { texture, width, height };
+}
+
+function createInstanceIDBuffer(gl, numInstances) {
+    // Create buffer with instance IDs (0, 1, 2, ..., numInstances-1)
+    const data = new Float32Array(numInstances);
+    for (let i = 0; i < numInstances; i++) {
+        data[i] = i;
+    }
+    
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    
+    console.log(`Created instance ID buffer: ${numInstances} IDs`);
+    console.log(`First 10 IDs:`, Array.from(data.slice(0, 10)));
+    console.log(`Last 10 IDs:`, Array.from(data.slice(-10)));
+    
+    return buffer;
+}
+
+// ============================================================================
+// MAIN RENDER FUNCTION
+// ============================================================================
+
 export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, path, projMatrix, viewMatrix, modelMatrix, program) {
 
     // start loading if not already loading or loaded
@@ -16,6 +77,11 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
             console.log(`First voxel coords: x=${struct.voxels[0].x}, y=${struct.voxels[0].y}, z=${struct.voxels[0].z}`);
             console.log(`Second voxel coords: x=${struct.voxels[1].x}, y=${struct.voxels[1].y}, z=${struct.voxels[1].z}`);
             console.log(`Rendering ${struct.voxels.length} cube instances`);
+            
+            // Create instance data texture for picking
+            renderStructure.instanceDataTexture = createInstanceDataTexture(gl, struct);
+            renderStructure.instanceIDBuffer = createInstanceIDBuffer(gl, struct.voxels.length);
+            console.log('✅ Instance data texture and ID buffer created for picking');
         }).catch(error => {
             console.error('Failed to load structure:', error);
             renderStructure.loading = null;
@@ -39,7 +105,7 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         renderStructure.callsThisFrame = 0;
     }
     renderStructure.callsThisFrame++;
-    if (Date.now() - (renderStructure.lastLog || 0) > 1000) {
+    if (Date.now() - (renderStructure.lastLog || 0) > 5000) {
         console.log(`Render calls per frame: ${renderStructure.callsThisFrame}. Rendering ${numCubes}/${structure.voxels.length} voxels`);
         renderStructure.lastLog = Date.now();
         renderStructure.callsThisFrame = 0;
@@ -65,13 +131,13 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
     gl.uniformMatrix4fv(projLoc, false, projMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
     
-    // PHONG: Set lighting uniforms - reduced specular to prevent blown-out highlights
+
     if (lightDirLoc !== null) gl.uniform3f(lightDirLoc, 0.5, 0.5, -1.0);
     if (lightColorLoc !== null) gl.uniform3f(lightColorLoc, 1.0, 1.0, 1.0);
     if (lightAmbientLoc !== null) gl.uniform3f(lightAmbientLoc, 0.6, 0.6, 0.6);
-    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.3, 0.3, 0.3);  // Reduced from 0.8
+    if (lightSpecularLoc !== null) gl.uniform3f(lightSpecularLoc, 0.3, 0.3, 0.3);  
     if (matAmbientLoc !== null) gl.uniform3f(matAmbientLoc, 1.0, 1.0, 1.0);
-    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.2, 0.2, 0.2);  // Reduced from 0.5
+    if (matSpecularLoc !== null) gl.uniform3f(matSpecularLoc, 0.2, 0.2, 0.2);  
     if (shininessLoc !== null) gl.uniform1f(shininessLoc, 32.0);
     
 
@@ -114,24 +180,16 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         structurePositions[i * 3 + 1] = voxel.y - centerY;
         structurePositions[i * 3 + 2] = voxel.z - centerZ;
         
-        // making it obvious if transparency is working
-        const relativeZ = voxel.z / structure.dimensions.nz; // 0-1 range
-        
-        if (relativeZ < 0.33) {
-            // front is red
-            structureColors[i * 3] = 0.0;
-            structureColors[i * 3 + 1] = 0.0;
-            structureColors[i * 3 + 2] = 1.0;
-        } else if (relativeZ < 0.66) {
-            // middle is green
-            structureColors[i * 3] = 0.0;
-            structureColors[i * 3 + 1] = 0.0;
-            structureColors[i * 3 + 2] = 1.0;
+        // Check if this voxel has been picked - if so, make it RED
+        if (pickedVoxels.has(i)) {
+            structureColors[i * 3] = 1.0;     // R
+            structureColors[i * 3 + 1] = 0.0; // G
+            structureColors[i * 3 + 2] = 0.0; // B
         } else {
-            // back is blue /// CHANGING EVERYTHING TO BLUE FOR NOW -- CHANGE OTHER COLORS IF YOU WANT
-            structureColors[i * 3] = 0.0;
-            structureColors[i * 3 + 1] = 0.0;
-            structureColors[i * 3 + 2] = 1.0;
+            // Default color: blue for all unpicked voxels
+            structureColors[i * 3] = 0.0;     // R
+            structureColors[i * 3 + 1] = 0.0; // G
+            structureColors[i * 3 + 2] = 1.0; // B
         }
     }
     
@@ -185,5 +243,283 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         numCubes
     );
 
+}
+
+// ============================================================================
+// PICKING FUNCTION
+// ============================================================================
+
+export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mouseY, 
+                          projMatrix, viewMatrix, modelMatrix, pickingProgram, canvas) {
+    
+    const structure = renderStructure.cachedStructure;
+    if (!structure) {
+        console.warn('⚠️ Cannot pick: structure not loaded yet');
+        return null;
+    }
+    
+    // Initialize picking FBO if needed
+    if (!renderStructure.pickingFBO) {
+        renderStructure.pickingFBO = gl.createFramebuffer();
+        
+        renderStructure.pickingTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, renderStructure.pickingTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 
+                      canvas.width, canvas.height, 0,
+                      gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        
+        renderStructure.pickingDepth = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, renderStructure.pickingDepth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 
+                              canvas.width, canvas.height);
+        
+        gl.bindFramebuffer(gl.FRAMEBUFFER, renderStructure.pickingFBO);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 
+                               gl.TEXTURE_2D, renderStructure.pickingTexture, 0);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, 
+                                  gl.RENDERBUFFER, renderStructure.pickingDepth);
+        
+        const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) {
+            console.error('❌ Picking framebuffer incomplete:', status);
+            return null;
+        }
+        
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        console.log('✅ Picking FBO initialized');
+    }
+    
+    // Render to picking FBO
+    gl.bindFramebuffer(gl.FRAMEBUFFER, renderStructure.pickingFBO);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    
+    // Debug: Clear to bright magenta to verify FBO is being used
+    gl.clearColor(1, 0, 1, 1);  // Magenta = (255, 0, 255)
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    
+    if (!pickVoxel.loggedFBOSetup) {
+        console.log('🎯 Picking FBO render starting...');
+        console.log(`   Viewport: ${canvas.width}×${canvas.height}`);
+        console.log(`   Picking program pointer: ${pickingProgram}`);
+        pickVoxel.loggedFBOSetup = true;
+    }
+    
+    gl.useProgram(pickingProgram);
+    
+    // Verify the program is being used
+    const currentProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+    console.log(`   Current program: ${currentProgram}, Picking program: ${pickingProgram}, Match: ${currentProgram === pickingProgram}`);
+    if (currentProgram !== pickingProgram) {
+        console.error(`   ❌ Program mismatch! Picking shader is NOT active!`);
+        return null;
+    }
+    
+    // Set matrices (same as normal rendering)
+    const projLoc = gl.getUniformLocation(pickingProgram, 'u_projectionMatrix');
+    const viewLoc = gl.getUniformLocation(pickingProgram, 'u_viewMatrix');
+    const modelLoc = gl.getUniformLocation(pickingProgram, 'u_modelMatrix');
+    const cubeScaleLoc = gl.getUniformLocation(pickingProgram, 'u_cubeScale');
+    
+    gl.uniformMatrix4fv(projLoc, false, projMatrix);
+    gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
+    
+    // Same model matrix as rendering
+    const globalScale = 0.02;
+    const zScale = renderStructure.zScale || 1.0;
+    modelMatrix = new Float32Array([
+        globalScale, 0, 0, 0,
+        0, globalScale, 0, 0,
+        0, 0, globalScale * zScale, 0,
+        0, 0, -1, 1
+    ]);
+    gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
+    
+    const voxelSize = renderStructure.voxelScale || 3.0;
+    if (cubeScaleLoc !== null) {
+        gl.uniform1f(cubeScaleLoc, voxelSize);
+    }
+    
+    // Set up vertex attributes
+    const posLoc = gl.getAttribLocation(pickingProgram, 'a_position');
+    const instPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
+    const instIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
+    
+    // Debug logging (only first time)
+    if (!pickVoxel.loggedAttributes) {
+        console.log('Picking attribute locations:');
+        console.log(`  a_position: ${posLoc}`);
+        console.log(`  a_instancePosition: ${instPosLoc}`);
+        console.log(`  a_instanceID: ${instIDLoc}`);
+        pickVoxel.loggedAttributes = true;
+    }
+    
+    // Cube geometry
+    if (!cubeBuffer) {
+        console.error('❌ Cube buffer is null!');
+        return null;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(posLoc);
+    instancingExt.vertexAttribDivisorANGLE(posLoc, 0);
+    
+    if (!pickVoxel.loggedGeometry) {
+        const bufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
+        console.log(`   Cube buffer size: ${bufferSize} bytes`);
+        pickVoxel.loggedGeometry = true;
+    }
+    
+    // Instance positions - must be populated first!
+    if (!renderStructure.positionBuffer) {
+        console.error('❌ Position buffer not created yet! Need to render scene first.');
+        console.log('   Creating position buffer now from structure data...');
+        
+        // Create position buffer on-demand
+        const centerX = structure.dimensions.nx / 2;
+        const centerY = structure.dimensions.ny / 2;
+        const centerZ = structure.dimensions.nz / 2;
+        
+        const positions = new Float32Array(structure.voxels.length * 3);
+        for (let i = 0; i < structure.voxels.length; i++) {
+            const voxel = structure.voxels[i];
+            positions[i * 3] = voxel.x - centerX;
+            positions[i * 3 + 1] = voxel.y - centerY;
+            positions[i * 3 + 2] = voxel.z - centerZ;
+        }
+        
+        renderStructure.positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        
+        console.log(`   ✅ Created position buffer with ${structure.voxels.length} voxels`);
+    }
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.positionBuffer);
+    gl.vertexAttribPointer(instPosLoc, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(instPosLoc);
+    instancingExt.vertexAttribDivisorANGLE(instPosLoc, 1);
+    
+    // Instance IDs
+    if (!renderStructure.instanceIDBuffer) {
+        console.error('❌ Instance ID buffer not created yet!');
+        return null;
+    }
+    if (instIDLoc >= 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.instanceIDBuffer);
+        gl.vertexAttribPointer(instIDLoc, 1, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(instIDLoc);
+        instancingExt.vertexAttribDivisorANGLE(instIDLoc, 1);
+    } else {
+        console.error('❌ a_instanceID attribute not found in picking shader!');
+    }
+    
+    if (!indexBuffer) {
+        console.error('❌ Index buffer is null!');
+        return null;
+    }
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    
+    // Draw
+    const numCubes = structure.voxels.length;
+    
+    // Final check before draw
+    const preDrawProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+    console.log(`   About to draw ${numCubes} cubes with program: ${preDrawProgram}`);
+    
+    // Check for GL errors before draw
+    const preDrawError = gl.getError();
+    if (preDrawError !== gl.NO_ERROR) {
+        console.error(`   ❌ GL error before draw: ${preDrawError}`);
+    }
+    
+    instancingExt.drawElementsInstancedANGLE(
+        gl.TRIANGLES,
+        36,
+        gl.UNSIGNED_SHORT,
+        0,
+        numCubes
+    );
+    
+    // Check for GL errors after draw
+    const drawError = gl.getError();
+    if (drawError !== gl.NO_ERROR) {
+        console.error(`   ❌ GL error after draw: ${drawError}`);
+    } else {
+        console.log(`   ✅ Draw call completed successfully`);
+    }
+    
+    // Verify FBO is still bound and complete
+    const boundFBO = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const fboStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    console.log(`   FBO bound: ${boundFBO === renderStructure.pickingFBO}, Status: ${fboStatus === gl.FRAMEBUFFER_COMPLETE ? 'COMPLETE' : fboStatus}`);
+    
+    // Read pixel at mouse position
+    const pixel = new Uint8Array(4);
+    gl.readPixels(mouseX, canvas.height - mouseY, 1, 1,
+                 gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    
+    // Restore normal rendering
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    
+    // Debug: Log raw pixel values
+    console.log(`📍 Pick at (${mouseX.toFixed(0)}, ${mouseY.toFixed(0)})`);
+    console.log(`   Raw pixel RGBA: (${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]})`);
+    
+    // If we see magenta (255, 0, 255), nothing was drawn
+    if (pixel[0] === 255 && pixel[1] === 0 && pixel[2] === 255) {
+        console.log('   ❌ Clicked on cleared background (no voxels rendered)');
+        return null;
+    }
+    
+    // Decode instance ID from RGB
+    // Shader encodes as: R = high byte, G = mid byte, B = low byte
+    // So: ID = R*65536 + G*256 + B
+    const instanceID = pixel[0] * 65536 + pixel[1] * 256 + pixel[2];
+    
+    console.log(`   Decoded instance ID: ${instanceID} (max: ${structure.voxels.length - 1})`);
+    console.log(`   Calculation: ${pixel[0]}*65536 + ${pixel[1]}*256 + ${pixel[2]} = ${instanceID}`);
+    
+    // Check if valid
+    if (instanceID >= structure.voxels.length) {
+        console.log(`   ❌ Invalid: ID ${instanceID} out of range [0-${structure.voxels.length - 1}]`);
+        return null;
+    }
+    
+    console.log(`   ✅ Valid voxel picked!`);
+    
+    // Add to picked voxels set for visual feedback
+    pickedVoxels.add(instanceID);
+    console.log(`   🔴 Marked voxel ${instanceID} as picked (total picked: ${pickedVoxels.size})`);
+    
+    const voxel = structure.voxels[instanceID];
+    
+    // Calculate world position
+    const centerX = structure.dimensions.nx / 2;
+    const centerY = structure.dimensions.ny / 2;
+    const centerZ = structure.dimensions.nz / 2;
+    
+    const worldX = (voxel.x - centerX) * globalScale;
+    const worldY = (voxel.y - centerY) * globalScale;
+    const worldZ = (voxel.z - centerZ) * globalScale - 1;
+    
+    return {
+        instanceID,
+        x: voxel.x,
+        y: voxel.y,
+        z: voxel.z,
+        value: voxel.value,
+        worldX,
+        worldY,
+        worldZ
+    };
+}
+
+// Export function to clear picked voxels (useful for resetting)
+export function clearPickedVoxels() {
+    pickedVoxels.clear();
+    console.log('🔄 Cleared all picked voxels');
 }
 

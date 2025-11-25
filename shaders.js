@@ -1,10 +1,10 @@
 
-export const VS_SOURCE = `
-    attribute vec4 a_position;
-    attribute vec3 a_instancePosition;
+export const VS_SOURCE = `#version 300 es
+    in vec4 a_position;
+    in vec3 a_instancePosition;
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
-    varying vec3 v_worldPosition;
+    out vec3 v_worldPosition;
     void main() {
         vec4 worldPosition = a_position + vec4(a_instancePosition, 0.0);
         vec4 viewPosition = u_viewMatrix * worldPosition;
@@ -13,28 +13,29 @@ export const VS_SOURCE = `
     }
 `;
 
-export const FS_SOURCE = `
+export const FS_SOURCE = `#version 300 es
     precision mediump float;
-    varying vec3 v_worldPosition;
+    in vec3 v_worldPosition;
+    out vec4 fragColor;
     void main() {
         vec3 color = v_worldPosition * 0.1 + 0.5;
-        gl_FragColor = vec4(color, 1.0);
+        fragColor = vec4(color, 1.0);
     }
 `;
 
-export const SIMPLE_VS = `
-    attribute vec3 a_position;
-    attribute vec3 a_instancePosition;
-    attribute vec3 a_color;
+export const SIMPLE_VS = `#version 300 es
+    in vec3 a_position;
+    in vec3 a_instancePosition;
+    in vec3 a_color;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
     uniform float u_cubeScale;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
-    varying vec3 v_color;
+    out vec3 v_position;
+    out vec3 v_normal;
+    out vec3 v_color;
     
     void main() {
         vec3 scaledCubeVertex = a_position * u_cubeScale;
@@ -48,7 +49,7 @@ export const SIMPLE_VS = `
     }
 `;
 
-export const SIMPLE_FS = `
+export const SIMPLE_FS = `#version 300 es
     precision highp float;
     
     uniform int u_useVertexColor;
@@ -66,9 +67,11 @@ export const SIMPLE_FS = `
     uniform vec3 u_materialSpecular;
     uniform float u_shininess;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
-    varying vec3 v_color;
+    in vec3 v_position;
+    in vec3 v_normal;
+    in vec3 v_color;
+    
+    out vec4 fragColor;
     
     void main() {
         vec3 N = normalize(v_normal);
@@ -93,20 +96,20 @@ export const SIMPLE_FS = `
         
         vec3 finalColor = Ia + Id + Is;
         
-        gl_FragColor = vec4(finalColor, 1.0);
+        fragColor = vec4(finalColor, 1.0);
     }
 `;
 
-export const PEEL_VS = `
-    attribute vec3 a_position;
-    attribute vec3 a_instancePosition;
+export const PEEL_VS = `#version 300 es
+    in vec3 a_position;
+    in vec3 a_instancePosition;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
+    out vec3 v_position;
+    out vec3 v_normal;
     
     void main() {
         vec3 pos = a_position + a_instancePosition;
@@ -115,9 +118,10 @@ export const PEEL_VS = `
         
         v_position = worldPos.xyz;
         v_normal = a_position;
+    }
 `;
 
-export const PEEL_FS = `
+export const PEEL_FS = `#version 300 es
     precision highp float;
     
     uniform sampler2D u_depthTexture;
@@ -125,12 +129,15 @@ export const PEEL_FS = `
     uniform float u_alpha;
     uniform int u_pass;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
+    in vec3 v_position;
+    in vec3 v_normal;
+    
+    layout(location = 0) out vec4 outDepth;
+    layout(location = 1) out vec4 outColor;
     
     void main() {
         vec2 screenCoord = gl_FragCoord.xy / u_screenSize;
-        float prevDepth = texture2D(u_depthTexture, screenCoord).r;
+        float prevDepth = texture(u_depthTexture, screenCoord).r;
         float currDepth = gl_FragCoord.z;
         
         // depth peeling - discard if at or in front of previous layer
@@ -145,14 +152,14 @@ export const PEEL_FS = `
         
         vec3 color = abs(normalize(v_position)) * diff;
         
-        gl_FragData[0] = vec4(currDepth, 0.0, 0.0, 1.0);
-        gl_FragData[1] = vec4(color, u_alpha);
+        outDepth = vec4(currDepth, 0.0, 0.0, 1.0);
+        outColor = vec4(color, u_alpha);
     }
 `;
 
-export const BLEND_VS = `
-    attribute vec2 a_position;
-    varying vec2 v_texCoord;
+export const BLEND_VS = `#version 300 es
+    in vec2 a_position;
+    out vec2 v_texCoord;
     
     void main() {
         v_texCoord = a_position * 0.5 + 0.5;
@@ -160,33 +167,34 @@ export const BLEND_VS = `
     }
 `;
 
-export const BLEND_FS = `
+export const BLEND_FS = `#version 300 es
     precision highp float;
     
     uniform sampler2D u_colorTexture;
-    varying vec2 v_texCoord;
+    in vec2 v_texCoord;
+    out vec4 fragColor;
     
     void main() {
-        vec4 color = texture2D(u_colorTexture, v_texCoord);
-        gl_FragColor = color;
+        vec4 color = texture(u_colorTexture, v_texCoord);
+        fragColor = color;
     }
 `;
 
 
-export const APPROX_VS = `
-    attribute vec3 a_position;
-    attribute vec3 a_instancePosition;
-    attribute vec3 a_color;
+export const APPROX_VS = `#version 300 es
+    in vec3 a_position;
+    in vec3 a_instancePosition;
+    in vec3 a_color;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
     uniform float u_cubeScale;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
-    varying vec3 v_color;
-    varying float v_depth;
+    out vec3 v_position;
+    out vec3 v_normal;
+    out vec3 v_color;
+    out float v_depth;
     
     void main() {
         vec3 scaledCubeVertex = a_position * u_cubeScale;
@@ -202,8 +210,7 @@ export const APPROX_VS = `
     }
 `;
 
-export const APPROX_FS = `
-    #extension GL_EXT_draw_buffers : require
+export const APPROX_FS = `#version 300 es
     precision highp float;
     
     uniform float u_alpha;
@@ -222,10 +229,13 @@ export const APPROX_FS = `
     uniform vec3 u_materialSpecular;
     uniform float u_shininess;
     
-    varying vec3 v_position;
-    varying vec3 v_normal;
-    varying vec3 v_color;
-    varying float v_depth;
+    in vec3 v_position;
+    in vec3 v_normal;
+    in vec3 v_color;
+    in float v_depth;
+    
+    layout(location = 0) out vec4 accumColor;
+    layout(location = 1) out vec4 revealage;
     
     void main() {
         vec3 N = normalize(v_normal);
@@ -258,17 +268,17 @@ export const APPROX_FS = `
         vec3 premultColor = finalColor * u_alpha;
         
         // accumulate weighted color
-        gl_FragData[0] = vec4(premultColor * weight, u_alpha * weight);
+        accumColor = vec4(premultColor * weight, u_alpha * weight);
         
         // accumulate transmittance
         float transmittance = 1.0 - u_alpha;
-        gl_FragData[1] = vec4(transmittance, 0.0, 0.0, 0.0);
+        revealage = vec4(transmittance, 0.0, 0.0, 0.0);
     }
 `;
 
-export const APPROX_COMPOSITE_VS = `
-    attribute vec2 a_position;
-    varying vec2 v_texCoord;
+export const APPROX_COMPOSITE_VS = `#version 300 es
+    in vec2 a_position;
+    out vec2 v_texCoord;
     
     void main() {
         v_texCoord = a_position * 0.5 + 0.5;
@@ -276,20 +286,21 @@ export const APPROX_COMPOSITE_VS = `
     }
 `;
 
-export const APPROX_COMPOSITE_FS = `
+export const APPROX_COMPOSITE_FS = `#version 300 es
     precision highp float;
     
     uniform sampler2D u_accumTexture;
     uniform sampler2D u_revealTexture;
     
-    varying vec2 v_texCoord;
+    in vec2 v_texCoord;
+    out vec4 fragColor;
     
     void main() {
-        vec4 accum = texture2D(u_accumTexture, v_texCoord);
-        float sumTransmittance = texture2D(u_revealTexture, v_texCoord).r;
+        vec4 accum = texture(u_accumTexture, v_texCoord);
+        float sumTransmittance = texture(u_revealTexture, v_texCoord).r;
         
         if (accum.a < 0.001) {
-            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+            fragColor = vec4(1.0, 1.0, 1.0, 1.0);
             return;
         }
         
@@ -314,6 +325,87 @@ export const APPROX_COMPOSITE_FS = `
         
         vec3 finalColor = mix(vec3(1.0), darkenedColor, opacity);
         
-        gl_FragColor = vec4(finalColor, 1.0);
+        fragColor = vec4(finalColor, 1.0);
+    }
+`;
+
+// ============================================================================
+// PICKING SHADERS - Encode instance ID as color for mouse picking
+// ============================================================================
+
+export const PICKER_VS = `
+    attribute vec3 a_position;
+    attribute vec3 a_instancePosition;
+    
+    uniform mat4 u_projectionMatrix;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    uniform float u_cubeScale;
+    uniform sampler2D u_instanceDataTexture;
+    uniform float u_instanceTextureWidth;
+    
+    varying float v_instanceID;
+    
+    void main() {
+        // Get instance ID (WebGL1 ANGLE_instanced_arrays doesn't have gl_InstanceID)
+        // We'll pass it via a separate attribute or compute it
+        // For now, we'll use a workaround - pass via texture lookup
+        
+        vec3 scaledCubeVertex = a_position * u_cubeScale;
+        vec3 pos = scaledCubeVertex + a_instancePosition;
+        vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
+        gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
+        
+        // Instance ID will be passed from vertex attribute
+        v_instanceID = 0.0; // Will be set by attribute
+    }
+`;
+
+export const PICKER_VS_SIMPLE = `#version 300 es
+    in vec3 a_position;
+    in vec3 a_instancePosition;
+    in float a_instanceID;
+    
+    uniform mat4 u_projectionMatrix;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    uniform float u_cubeScale;
+    
+    out float v_instanceID;
+    
+    void main() {
+        vec3 scaledCubeVertex = a_position * u_cubeScale;
+        vec3 pos = scaledCubeVertex + a_instancePosition;
+        vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
+        gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
+        
+        v_instanceID = a_instanceID;
+    }
+`;
+
+export const PICKER_FS = `#version 300 es
+    precision highp float;
+    
+    in float v_instanceID;
+    out vec4 fragColor;
+    
+    void main() {
+        // Encode instance ID into RGB channels
+        // For IDs 0-226575, we only need R and G channels (B stays 0)
+        float id = v_instanceID;
+        
+        // Simple encoding: R = high byte, G = mid byte, B = low byte
+        // ID = R*65536 + G*256 + B
+        float r = floor(id / 65536.0);
+        float remaining = id - (r * 65536.0);
+        float g = floor(remaining / 256.0);
+        float b = mod(remaining, 256.0);
+        
+        // Normalize to 0-1 range and output
+        fragColor = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
+        
+        // DEBUG: Uncomment to visualize low IDs as grayscale
+        // float gray = id / 1000.0;
+        // fragColor = vec4(gray, gray, gray, 1.0);
     }
 `;

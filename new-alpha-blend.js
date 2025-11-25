@@ -1,6 +1,6 @@
 import { cubeSize, indices, vertices } from "./cube.js";
-import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS } from "./shaders.js";
-import { renderStructure } from "./rendering/renderStructure.js";
+import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
+import { renderStructure, pickVoxel, clearPickedVoxels } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
@@ -14,22 +14,26 @@ export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
 // UTILITY FUNCTIONS
 // ============================================================================
 
-function compileShader(gl, source, type) {
+function compileShader(gl, source, type, debugName = '') {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        console.error(`❌ Shader compile error (${debugName}):`, gl.getShaderInfoLog(shader));
+        console.error('Shader source:', source.substring(0, 300));
         gl.deleteShader(shader);
         return null;
     }
     return shader;
 }
 
-function createProgram(gl, vsSource, fsSource) {
-    const vertexShader = compileShader(gl, vsSource, gl.VERTEX_SHADER);
-    const fragmentShader = compileShader(gl, fsSource, gl.FRAGMENT_SHADER);
-    if (!vertexShader || !fragmentShader) return null;
+function createProgram(gl, vsSource, fsSource, debugName = '') {
+    const vertexShader = compileShader(gl, vsSource, gl.VERTEX_SHADER, `${debugName} VS`);
+    const fragmentShader = compileShader(gl, fsSource, gl.FRAGMENT_SHADER, `${debugName} FS`);
+    if (!vertexShader || !fragmentShader) {
+        console.error(`❌ Failed to compile shaders for ${debugName}`);
+        return null;
+    }
     
     const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
@@ -37,7 +41,7 @@ function createProgram(gl, vsSource, fsSource) {
     gl.linkProgram(program);
     
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Program link error:', gl.getProgramInfoLog(program));
+        console.error(`❌ Program link error (${debugName}):`, gl.getProgramInfoLog(program));
         gl.deleteProgram(program);
         return null;
     }
@@ -48,9 +52,27 @@ function createTexture(gl, width, height, format, type) {
     width = Math.floor(width);
     height = Math.floor(height);
     
+    // WebGL 2.0: Use sized internal formats
+    let internalFormat = format;
+    if (format === gl.RGBA) {
+        if (type === gl.UNSIGNED_BYTE) {
+            internalFormat = gl.RGBA8;
+        } else if (type === gl.FLOAT) {
+            internalFormat = gl.RGBA32F;
+        }
+    } else if (format === gl.RGB) {
+        if (type === gl.UNSIGNED_BYTE) {
+            internalFormat = gl.RGB8;
+        } else if (type === gl.FLOAT) {
+            internalFormat = gl.RGB32F;
+        }
+    } else if (format === gl.DEPTH_COMPONENT) {
+        internalFormat = gl.DEPTH_COMPONENT24;
+    }
+    
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, format, width, height, 0, format, type, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -72,6 +94,7 @@ let xrSession = null;
 let xrReferenceSpace = null;
 
 let simpleProgram = null;
+let pickingProgram = null;
 
 let cubeBuffer = null;
 let cubeColorBuffer = null; 
@@ -125,46 +148,73 @@ function updateStatus(message) {
 function initGL() {
     const canvas = document.createElement('canvas');
     
-    gl = canvas.getContext('webgl', { 
+    gl = canvas.getContext('webgl2', { 
         xrCompatible: true,
         antialias: false,
         alpha: false
     });
     
     if (!gl) {
-        updateStatus('Failed to get WebGL context');
+        updateStatus('Failed to get WebGL 2.0 context');
         return false;
     }
+    
+    console.log('✅ WebGL 2.0 context created');
+    console.log('   Version:', gl.getParameter(gl.VERSION));
+    console.log('   GLSL Version:', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
 
-    // try both extension variants (Quest uses EXT version)
-    drawBuffersExt = gl.getExtension('WEBGL_draw_buffers') || gl.getExtension('EXT_draw_buffers');
-    if (drawBuffersExt) {
-        console.log('MRT extension found:', drawBuffersExt.constructor.name);
-        // normalize the API - EXT version uses different constant names
-        if (!drawBuffersExt.COLOR_ATTACHMENT0_WEBGL) {
-            drawBuffersExt.COLOR_ATTACHMENT0_WEBGL = drawBuffersExt.COLOR_ATTACHMENT0_EXT;
-            drawBuffersExt.COLOR_ATTACHMENT1_WEBGL = drawBuffersExt.COLOR_ATTACHMENT1_EXT;
-            drawBuffersExt.drawBuffersWEBGL = drawBuffersExt.drawBuffersEXT;
+    // WebGL 2.0: Multiple Render Targets and Instancing are built-in!
+    console.log('✅ Multiple Render Targets: Built-in');
+    console.log('✅ Instanced Rendering: Built-in');
+    
+    // Create compatibility object for instancing (WebGL 2 built-in functions)
+    instancingExt = {
+        drawElementsInstancedANGLE: (mode, count, type, offset, primcount) => {
+            gl.drawElementsInstanced(mode, count, type, offset, primcount);
+        },
+        drawArraysInstancedANGLE: (mode, first, count, primcount) => {
+            gl.drawArraysInstanced(mode, first, count, primcount);
+        },
+        vertexAttribDivisorANGLE: (index, divisor) => {
+            gl.vertexAttribDivisor(index, divisor);
         }
-    } else {
-        updateStatus('MRT not supported - using simple transparency');
-    }
+    };
+    
+    drawBuffersExt = {
+        COLOR_ATTACHMENT0_WEBGL: gl.COLOR_ATTACHMENT0,
+        COLOR_ATTACHMENT1_WEBGL: gl.COLOR_ATTACHMENT1,
+        drawBuffersWEBGL: (buffers) => {
+            gl.drawBuffers(buffers);
+        }
+    };
 
-    instancingExt = gl.getExtension('ANGLE_instanced_arrays');
-    if (!instancingExt) {
-        updateStatus('Instanced rendering not supported');
-        return false;
-    }
-
-    simpleProgram = createProgram(gl, SIMPLE_VS, SIMPLE_FS);
+    simpleProgram = createProgram(gl, SIMPLE_VS, SIMPLE_FS, 'Simple');
     if (!simpleProgram) {
         updateStatus('Failed to create fallback shader program');
         return false;
     }
+    
+    pickingProgram = createProgram(gl, PICKER_VS_SIMPLE, PICKER_FS, 'Picking');
+    if (!pickingProgram) {
+        console.error('❌ Failed to create picking shader program - picking will be disabled');
+    } else {
+        console.log('✅ Picking program created successfully');
+        console.log(`   Program handle: ${pickingProgram}`);
+        
+        // Test: Verify attributes exist
+        const testPosLoc = gl.getAttribLocation(pickingProgram, 'a_position');
+        const testInstPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
+        const testInstIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
+        console.log(`   Attribute locations: a_position=${testPosLoc}, a_instancePosition=${testInstPosLoc}, a_instanceID=${testInstIDLoc}`);
+        
+        if (testInstIDLoc < 0) {
+            console.error('   ❌ WARNING: a_instanceID attribute not found! Picking will not work correctly.');
+        }
+    }
 
     if (drawBuffersExt) {
-        approxProgram = createProgram(gl, APPROX_VS, APPROX_FS);
-        approxCompositeProgram = createProgram(gl, APPROX_COMPOSITE_VS, APPROX_COMPOSITE_FS);
+        approxProgram = createProgram(gl, APPROX_VS, APPROX_FS, 'Approx');
+        approxCompositeProgram = createProgram(gl, APPROX_COMPOSITE_VS, APPROX_COMPOSITE_FS, 'ApproxComposite');
         
         if (approxProgram && approxCompositeProgram) {
             updateStatus('Approximate alpha blending available');
@@ -369,7 +419,7 @@ function drawSceneWithApproxBlending(view) {
     if (!drawSceneWithApproxBlending.frameCount) drawSceneWithApproxBlending.frameCount = 0;
     drawSceneWithApproxBlending.frameCount++;
     if (drawSceneWithApproxBlending.frameCount % 60 === 0) {
-        console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
+        // Reduced logging: console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
     }
     
     const modelMatrix = new Float32Array([
@@ -385,14 +435,19 @@ function drawSceneWithApproxBlending(view) {
     gl.scissor(x, y, width, height);
     gl.viewport(x, y, width, height);
     
-    // framebuffer already cleared in onXRFrame - just set viewport
-    
     gl.disable(gl.BLEND);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
 
     const program = simpleProgram || approxProgram;
+    
+    // save matrices for picking (use first/left eye matrices)
+    if (!window.lastProjMatrix || isLeftEye) {
+        window.lastProjMatrix = view.projectionMatrix;
+        window.lastViewMatrix = view.transform.inverse.matrix;
+    }
+    
     renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, program);
     
     gl.disable(gl.SCISSOR_TEST);
@@ -432,7 +487,7 @@ function drawSceneWithApproxBlending(view) {
     
     gl.enable(gl.BLEND);
     gl.blendEquation(gl.FUNC_ADD);
-    // ALPHA BLEND: Both color and alpha should be additive for weighted OIT
+
     gl.blendFunc(gl.ONE, gl.ONE);
     
     gl.depthMask(false); 
@@ -449,6 +504,11 @@ function drawSceneWithApproxBlending(view) {
     }
     
     gl.uniform1f(alphaLoc, ALPHA);
+    
+    if (!window.lastProjMatrix || isLeftEye) {
+        window.lastProjMatrix = view.projectionMatrix;
+        window.lastViewMatrix = view.transform.inverse.matrix;
+    }
 
     renderStructure(gl, instancingExt, cubeBuffer, indexBuffer, ALPHA, PATH, view.projectionMatrix, view.transform.inverse.matrix, modelMatrix, approxProgram);
     // drawDNAHelix(gl, instancingExt, 2000, view.projectionMatrix, view.transform.inverse.matrix, approxProgram);
@@ -515,7 +575,7 @@ function onXRFrame(time, frame) {
     if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
     onXRFrame.frameCount++;
     if (onXRFrame.frameCount % 60 === 0) {
-        console.log(`onXRFrame: ${pose.views.length} views`);
+        // Reduced logging: console.log(`onXRFrame: ${pose.views.length} views`);
     }
     
     for (const view of pose.views) {
@@ -612,4 +672,117 @@ window.addEventListener('load', async () => {
     } catch (error) {
         updateStatus(`Error checking VR support: ${error.message}`);
     }
+    
+    // ========================================================================
+    // MOUSE PICKING FOR DESKTOP TESTING
+    // ========================================================================
+    
+    const canvas = gl.canvas;
+    
+    // Mouse click handler for picking
+    canvas.addEventListener('click', (event) => {
+        if (!pickingProgram) {
+            console.warn('⚠️ Picking program not available');
+            return;
+        }
+        
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+        
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`🖱️ Click at screen position: (${mouseX.toFixed(0)}, ${mouseY.toFixed(0)})`);
+        console.log(`   Canvas size: ${canvas.width}×${canvas.height}`);
+        console.log(`   Display size: ${rect.width.toFixed(0)}×${rect.height.toFixed(0)}`);
+        
+        // Scale mouse coordinates to actual canvas resolution
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const scaledMouseX = mouseX * scaleX;
+        const scaledMouseY = mouseY * scaleY;
+        
+        console.log(`   Scaled to canvas: (${scaledMouseX.toFixed(0)}, ${scaledMouseY.toFixed(0)})`);
+        
+        const projMatrix = window.lastProjMatrix || mat4.create();
+        const viewMatrix = window.lastViewMatrix || mat4.create();
+        const modelMatrix = new Float32Array(16);
+        
+        const picked = pickVoxel(
+            gl, 
+            instancingExt, 
+            cubeBuffer, 
+            indexBuffer, 
+            scaledMouseX, 
+            scaledMouseY,
+            projMatrix,
+            viewMatrix,
+            modelMatrix,
+            pickingProgram,
+            canvas
+        );
+        
+        if (picked) {
+            console.log('.  PICKED VOXEL:');
+            console.log(`   Instance ID: ${picked.instanceID}`);
+            console.log(`   Grid Coordinates: (${picked.x}, ${picked.y}, ${picked.z})`);
+            console.log(`   World Position: (${picked.worldX.toFixed(3)}, ${picked.worldY.toFixed(3)}, ${picked.worldZ.toFixed(3)})`);
+            console.log(`   Value: ${picked.value}`);
+        } else {
+            console.log('❌ No voxel at this location (clicked on background)');
+        }
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    });
+    
+    // hold shift to continuously select voxels
+    canvas.addEventListener('mousemove', (event) => {
+        if (event.shiftKey && pickingProgram) {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            
+            // Scale coordinates
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const scaledMouseX = mouseX * scaleX;
+            const scaledMouseY = mouseY * scaleY;
+            
+            const projMatrix = window.lastProjMatrix || mat4.create();
+            const viewMatrix = window.lastViewMatrix || mat4.create();
+            const modelMatrix = new Float32Array(16);
+            
+            const picked = pickVoxel(
+                gl, 
+                instancingExt, 
+                cubeBuffer, 
+                indexBuffer, 
+                scaledMouseX, 
+                scaledMouseY,
+                projMatrix,
+                viewMatrix,
+                modelMatrix,
+                pickingProgram,
+                canvas
+            );
+            
+            canvas.style.cursor = picked ? 'pointer' : 'default';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    });
+    
+    // clear with ctrl
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'c' && !event.ctrlKey && !event.metaKey) {
+            clearPickedVoxels();
+        }
+    });
+    
+    window.clearPickedVoxels = clearPickedVoxels;
+    
+    console.log('✅ Mouse picking handlers registered');
+    console.log('💡 Click on voxels to see their ID and coordinates in the console');
+    console.log('💡 Picked voxels will turn RED');
+    console.log('💡 Press "c" key to clear all picked voxels');
+    console.log('💡 Or use: clearPickedVoxels() in console');
+    console.log('💡 Hold Shift while moving mouse to preview pickable voxels');
 });
