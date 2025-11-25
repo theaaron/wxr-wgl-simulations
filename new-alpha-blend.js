@@ -1,11 +1,12 @@
 import { cubeSize, indices, vertices } from "./cube.js";
 import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
-import { renderStructure, pickVoxel, clearPickedVoxels } from "./rendering/renderStructure.js";
+import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks } from "./rendering/vrControllers.js";
 
 
 export const PATH = 'resources/atria_64x64x64.json';
@@ -162,6 +163,12 @@ function initGL() {
     console.log('✅ WebGL 2.0 context created');
     console.log('   Version:', gl.getParameter(gl.VERSION));
     console.log('   GLSL Version:', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    
+    // Initialize VR controller system
+    initVRControllers(gl);
+    
+    // Expose addPickedVoxel to window for VR controller integration
+    window.addPickedVoxel = addPickedVoxel;
 
     // WebGL 2.0: Multiple Render Targets and Instancing are built-in!
     console.log('✅ Multiple Render Targets: Built-in');
@@ -560,6 +567,30 @@ function onXRFrame(time, frame) {
     
     xrSession.requestAnimationFrame(onXRFrame);
 
+    // Update VR controller poses
+    updateControllers(frame, xrReferenceSpace);
+    
+    // Process any pending controller picks
+    const structure = getStructure();
+    if (pickingProgram && structure) {
+        const modelMatrix = new Float32Array([
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        ]);
+        checkAndProcessPicks(
+            gl,
+            cubeBuffer,
+            indexBuffer,
+            modelMatrix,
+            pickingProgram,
+            structure,
+            getPositionBuffer(),
+            getInstanceIDBuffer()
+        );
+    }
+
     const pose = frame.getViewerPose(xrReferenceSpace);
     if (!pose) return;
 
@@ -580,6 +611,11 @@ function onXRFrame(time, frame) {
     
     for (const view of pose.views) {
         drawSceneWithApproxBlending(view);
+        
+        // Render controller rays after scene (so they appear on top)
+        const viewport = glLayer.getViewport(view);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
     }
 }
 
@@ -594,6 +630,9 @@ async function enterVR() {
         
         const session = await navigator.xr.requestSession('immersive-vr');
         xrSession = session;
+        
+        // Setup VR controller input listeners
+        setupControllerInput(session);
         
         updateStatus('VR session started');
         vrButton.textContent = 'Exit VR';

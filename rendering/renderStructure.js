@@ -8,6 +8,25 @@ import { loadStructure } from './loadStructure.js';
 // Track picked voxels for visual feedback
 const pickedVoxels = new Set();
 
+// Helper to add picked voxels (for VR controller integration)
+export function addPickedVoxel(instanceID) {
+    pickedVoxels.add(instanceID);
+    console.log(`✅ Added voxel ${instanceID} to picked set`);
+}
+
+// Getters for buffers (for VR controller picking)
+export function getPositionBuffer() {
+    return renderStructure.positionBuffer;
+}
+
+export function getInstanceIDBuffer() {
+    return renderStructure.instanceIDBuffer;
+}
+
+export function getStructure() {
+    return renderStructure.cachedStructure;
+}
+
 function createInstanceDataTexture(gl, structure) {
     const numVoxels = structure.voxels.length;
     
