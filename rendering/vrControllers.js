@@ -1,22 +1,34 @@
-// VR controller input and ray visualization
+// vr controller input and ray visualization
 import { pickVoxel } from './renderStructure.js';
 
 const RAY_LENGTH = 5.0;
 const RAY_COLOR = [0.5, 0.5, 0.5];
+const RAY_HIT_COLOR = [0.0, 1.0, 0.0];
+const RAY_RADIUS = 0.005;
+const RAY_SEGMENTS = 8;
 
 let leftController = null;
 let rightController = null;
-let rayLineBuffer = null;
 let rayProgram = null;
+let rayCylinderBuffer = null;
+let rayCylinderIndexBuffer = null;
+let rayCylinderIndexCount = 0;
+
+let leftHitDistance = null;
+let rightHitDistance = null;
 
 const RAY_VS = `#version 300 es
 in vec3 a_position;
 uniform mat4 u_projectionMatrix;
 uniform mat4 u_viewMatrix;
 uniform mat4 u_rayMatrix;
+uniform float u_rayLength;
 
 void main() {
-    vec4 worldPos = u_rayMatrix * vec4(a_position, 1.0);
+    vec3 scaledPos = a_position;
+    scaledPos.z *= u_rayLength;
+    
+    vec4 worldPos = u_rayMatrix * vec4(scaledPos, 1.0);
     gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
 }
 `;
@@ -34,15 +46,7 @@ void main() {
 export function initVRControllers(gl) {
     console.log('🎮 Initializing VR controllers...');
     
-    const rayVertices = new Float32Array([
-        0.0, 0.0, 0.0,
-        0.0, 0.0, -RAY_LENGTH
-    ]);
-    
-    rayLineBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, rayLineBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, rayVertices, gl.STATIC_DRAW);
-    
+    createRayCylinderGeometry(gl);
     rayProgram = createRayProgram(gl);
     
     if (rayProgram) {
@@ -52,6 +56,51 @@ export function initVRControllers(gl) {
         console.error('❌ Failed to initialize VR controller system');
         return false;
     }
+}
+
+function createRayCylinderGeometry(gl) {
+    const vertices = [];
+    const indices = [];
+    
+    // cylinder from z=0 to z=-1, scaled by ray length in shader
+    for (let i = 0; i <= RAY_SEGMENTS; i++) {
+        const angle = (i / RAY_SEGMENTS) * Math.PI * 2;
+        const x = Math.cos(angle) * RAY_RADIUS;
+        const y = Math.sin(angle) * RAY_RADIUS;
+        
+        vertices.push(x, y, 0);    // top circle
+        vertices.push(x, y, -1);   // bottom circle
+    }
+    
+    for (let i = 0; i < RAY_SEGMENTS; i++) {
+        const topLeft = i * 2;
+        const topRight = (i + 1) * 2;
+        const bottomLeft = i * 2 + 1;
+        const bottomRight = (i + 1) * 2 + 1;
+        
+        indices.push(topLeft, bottomLeft, topRight);
+        indices.push(topRight, bottomLeft, bottomRight);
+    }
+    
+    // end cap
+    const centerIndex = vertices.length / 3;
+    vertices.push(0, 0, -1);
+    
+    for (let i = 0; i < RAY_SEGMENTS; i++) {
+        const bottomLeft = i * 2 + 1;
+        const bottomRight = (i + 1) * 2 + 1;
+        indices.push(centerIndex, bottomRight, bottomLeft);
+    }
+    
+    rayCylinderBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, rayCylinderBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    
+    rayCylinderIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, rayCylinderIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+    
+    rayCylinderIndexCount = indices.length;
 }
 
 function createRayProgram(gl) {
@@ -87,43 +136,25 @@ function compileShader(gl, source, type) {
 }
 
 export function setupControllerInput(session) {
-    console.log('🎮 Setting up controller input listeners...');
-    
     session.addEventListener('select', onSelect);
     session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('selectend', onSelectEnd);
-    
-    console.log('✅ Controller input listeners registered');
 }
 
 function onSelect(event) {
-    console.log('🎮 Controller SELECT (trigger pressed)');
-    
     const inputSource = event.inputSource;
-    const frame = event.frame;
     
     if (inputSource.targetRayMode === 'tracked-pointer') {
-        if (inputSource.handedness === 'left') {
-            if (leftController) {
-                console.log('🎯 Left controller select event!');
-                performGPUPick(leftController);
-            }
-        } else if (inputSource.handedness === 'right') {
-            if (rightController) {
-                console.log('🎯 Right controller select event!');
-                performGPUPick(rightController);
-            }
+        if (inputSource.handedness === 'left' && leftController) {
+            performGPUPick(leftController);
+        } else if (inputSource.handedness === 'right' && rightController) {
+            performGPUPick(rightController);
         }
     }
 }
 
-function onSelectStart(event) {
-    console.log('🎮 Controller trigger DOWN');
-}
-
-function onSelectEnd(event) {
-    console.log('🎮 Controller trigger UP');
-}
+function onSelectStart(event) {}
+function onSelectEnd(event) {}
 
 let pickingFBO = null;
 let pickingTexture = null;
@@ -132,12 +163,6 @@ let pickingPixelBuffer = null;
 const PICK_RESOLUTION = 64;
 
 function performGPUPick(controller) {
-    console.log('🎯 GPU pick requested at controller ray:', {
-        origin: controller.origin,
-        direction: controller.direction,
-        handedness: controller.handedness
-    });
-    
     if (controller.handedness === 'left') {
         window.leftControllerPickRequested = true;
     } else if (controller.handedness === 'right') {
@@ -145,40 +170,30 @@ function performGPUPick(controller) {
     }
 }
 
-
 export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, modelMatrix, pickingProgram, structure, positionBuffer, instanceIDBuffer) {
     if (!controller || !pickingProgram || !structure) return null;
-    if (!positionBuffer || !instanceIDBuffer) {
-        console.warn('⚠️ Pick failed: instance buffers not ready');
-        return null;
-    }
-    if (!cubeBuffer || !indexBuffer) {
-        console.warn('⚠️ Pick failed: cube geometry buffers not ready');
-        return null;
-    }
+    if (!positionBuffer || !instanceIDBuffer) return null;
+    if (!cubeBuffer || !indexBuffer) return null;
     
     if (!pickingFBO) {
         initPickingFBO(gl);
     }
     
-    const pickProjMatrix = createPickProjectionMatrix(90);
+    // narrow FOV for precise picking
+    const pickProjMatrix = createPickProjectionMatrix(10);
     const pickViewMatrix = invertMatrix(controller.matrix);
     
-    if (!processControllerPick.debugLogged) {
-        console.log('🔍 DEBUG: Controller picking setup');
-        console.log('  Controller origin:', controller.origin);
-        console.log('  Controller direction:', controller.direction);
-        console.log('  Number of voxels:', structure.voxels.length);
-        console.log('  First voxel:', structure.voxels[0]);
-        console.log('  Model matrix:', Array.from(modelMatrix));
-        console.log('  Position buffer:', positionBuffer);
-        console.log('  Instance ID buffer:', instanceIDBuffer);
-        console.log('  Cube buffer:', cubeBuffer);
-        console.log('  Index buffer:', indexBuffer);
-        console.log('  Projection matrix:', Array.from(pickProjMatrix));
-        console.log('  View matrix (first 8 elements):', Array.from(pickViewMatrix).slice(0, 8));
-        processControllerPick.debugLogged = true;
-    }
+    // must match renderStructure model matrix
+    const globalScale = 0.02;
+    const zScale = 1.0;
+    const actualModelMatrix = new Float32Array([
+        globalScale, 0, 0, 0,
+        0, globalScale, 0, 0,
+        0, 0, globalScale * zScale, 0,
+        0, 0, -1, 1
+    ]);
+    
+    const voxelScale = window.renderStructureVoxelScale || 3.0;
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, pickingFBO);
     gl.viewport(0, 0, PICK_RESOLUTION, PICK_RESOLUTION);
@@ -198,20 +213,14 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     
     gl.uniformMatrix4fv(projLoc, false, pickProjMatrix);
     gl.uniformMatrix4fv(viewLoc, false, pickViewMatrix);
-    gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
-    gl.uniform1f(scaleLoc, 0.02);
+    gl.uniformMatrix4fv(modelLoc, false, actualModelMatrix);
+    gl.uniform1f(scaleLoc, voxelScale);
     
     const posLoc = gl.getAttribLocation(pickingProgram, 'a_position');
     const instPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
     const instIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
     
-    if (!processControllerPick.attrLogged) {
-        console.log('🔍 Attribute locations:', { posLoc, instPosLoc, instIDLoc });
-        processControllerPick.attrLogged = true;
-    }
-    
     if (posLoc === -1 || instPosLoc === -1 || instIDLoc === -1) {
-        console.error('❌ Invalid attribute locations:', { posLoc, instPosLoc, instIDLoc });
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         return null;
     }
@@ -232,20 +241,8 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     gl.vertexAttribDivisor(instIDLoc, 1);
     
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    
-    const errBefore = gl.getError();
-    if (errBefore !== gl.NO_ERROR) {
-        console.error('❌ GL error before pick draw:', errBefore);
-    }
-    
     gl.drawElementsInstanced(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0, structure.voxels.length);
     
-    const errAfter = gl.getError();
-    if (errAfter !== gl.NO_ERROR) {
-        console.error('❌ GL error after pick draw:', errAfter);
-    }
-    
-    // Read center pixel
     const centerX = Math.floor(PICK_RESOLUTION / 2);
     const centerY = Math.floor(PICK_RESOLUTION / 2);
     
@@ -258,13 +255,7 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     
     const pixel = pickingPixelBuffer;
     
-    if (!processControllerPick.pickCount) processControllerPick.pickCount = 0;
-    processControllerPick.pickCount++;
-    
-    if (processControllerPick.pickCount <= 5) {
-        console.log(`🔍 Pick #${processControllerPick.pickCount} pixel RGBA: [${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3]}]`);
-    }
-    
+    // magenta = no hit (clear color)
     if (pixel[0] === 255 && pixel[1] === 0 && pixel[2] === 255) {
         return null;
     }
@@ -272,11 +263,33 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     const instanceID = pixel[0] * 65536 + pixel[1] * 256 + pixel[2];
     
     if (instanceID >= structure.voxels.length) {
-        console.warn('⚠️ Invalid pick ID:', instanceID);
         return null;
     }
     
     const voxel = structure.voxels[instanceID];
+    
+    // calculate world position (same as renderStructure)
+    const centerVoxX = structure.dimensions.nx / 2;
+    const centerVoxY = structure.dimensions.ny / 2;
+    const centerVoxZ = structure.dimensions.nz / 2;
+    
+    const voxelWorldX = (voxel.x - centerVoxX) * globalScale;
+    const voxelWorldY = (voxel.y - centerVoxY) * globalScale;
+    const voxelWorldZ = (voxel.z - centerVoxZ) * globalScale - 1;
+    
+    // project onto ray direction for hit distance
+    const toVoxelX = voxelWorldX - controller.origin.x;
+    const toVoxelY = voxelWorldY - controller.origin.y;
+    const toVoxelZ = voxelWorldZ - controller.origin.z;
+    
+    const dirX = controller.direction.x;
+    const dirY = controller.direction.y;
+    const dirZ = controller.direction.z;
+    
+    const distanceAlongRay = toVoxelX * dirX + toVoxelY * dirY + toVoxelZ * dirZ;
+    
+    const voxelWorldSize = voxelScale * globalScale;
+    const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.1);
     
     return {
         instanceID,
@@ -284,7 +297,11 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
         y: voxel.y,
         z: voxel.z,
         value: voxel.value,
-        handedness: controller.handedness
+        worldX: voxelWorldX,
+        worldY: voxelWorldY,
+        worldZ: voxelWorldZ,
+        handedness: controller.handedness,
+        hitDistance: hitDistance
     };
 }
 
@@ -304,13 +321,7 @@ function initPickingFBO(gl) {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pickingTexture, 0);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, pickingDepthBuffer);
     
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        console.error('❌ Picking FBO incomplete:', status);
-    }
-    
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    console.log('✅ Controller picking FBO initialized');
 }
 
 function createPickProjectionMatrix(fovDegrees) {
@@ -332,12 +343,12 @@ function invertMatrix(mat) {
     const m = mat;
     const out = new Float32Array(16);
     
-    // transpose rotation (top-left 3x3)
+    // transpose rotation
     out[0] = m[0]; out[1] = m[4]; out[2] = m[8];  out[3] = 0;
     out[4] = m[1]; out[5] = m[5]; out[6] = m[9];  out[7] = 0;
     out[8] = m[2]; out[9] = m[6]; out[10] = m[10]; out[11] = 0;
     
-    // negate and transform translation
+    // transform translation
     const tx = -m[12];
     const ty = -m[13];
     const tz = -m[14];
@@ -386,7 +397,7 @@ export function updateControllers(frame, referenceSpace) {
 }
 
 export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
-    if (!rayProgram || !rayLineBuffer) return;
+    if (!rayProgram || !rayCylinderBuffer) return;
     
     gl.useProgram(rayProgram);
     
@@ -394,40 +405,43 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     const viewLoc = gl.getUniformLocation(rayProgram, 'u_viewMatrix');
     const rayMatrixLoc = gl.getUniformLocation(rayProgram, 'u_rayMatrix');
     const colorLoc = gl.getUniformLocation(rayProgram, 'u_rayColor');
+    const rayLengthLoc = gl.getUniformLocation(rayProgram, 'u_rayLength');
     
     gl.uniformMatrix4fv(projLoc, false, projectionMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
     
     const posLoc = gl.getAttribLocation(rayProgram, 'a_position');
-    gl.bindBuffer(gl.ARRAY_BUFFER, rayLineBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, rayCylinderBuffer);
     gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(posLoc);
     
-    const depthTestWasEnabled = gl.isEnabled(gl.DEPTH_TEST);
-    gl.disable(gl.DEPTH_TEST);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, rayCylinderIndexBuffer);
+    
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
     
     if (leftController) {
-        const leftColor = lastLeftPick ? [0.0, 1.0, 0.0] : RAY_COLOR;
+        const hasHit = lastLeftPick !== null;
+        const leftColor = hasHit ? RAY_HIT_COLOR : RAY_COLOR;
+        const leftLength = leftHitDistance !== null ? leftHitDistance : RAY_LENGTH;
+        
         gl.uniform3fv(colorLoc, leftColor);
+        gl.uniform1f(rayLengthLoc, leftLength);
         gl.uniformMatrix4fv(rayMatrixLoc, false, leftController.matrix);
-        gl.drawArrays(gl.LINES, 0, 2);
+        gl.drawElements(gl.TRIANGLES, rayCylinderIndexCount, gl.UNSIGNED_SHORT, 0);
     }
     
     if (rightController) {
-        const rightColor = lastRightPick ? [0.0, 1.0, 0.0] : RAY_COLOR;
+        const hasHit = lastRightPick !== null;
+        const rightColor = hasHit ? RAY_HIT_COLOR : RAY_COLOR;
+        const rightLength = rightHitDistance !== null ? rightHitDistance : RAY_LENGTH;
+        
         gl.uniform3fv(colorLoc, rightColor);
+        gl.uniform1f(rayLengthLoc, rightLength);
         gl.uniformMatrix4fv(rayMatrixLoc, false, rightController.matrix);
-        gl.drawArrays(gl.LINES, 0, 2);
-    }
-    
-    if (depthTestWasEnabled) {
-        gl.enable(gl.DEPTH_TEST);
+        gl.drawElements(gl.TRIANGLES, rayCylinderIndexCount, gl.UNSIGNED_SHORT, 0);
     }
 }
-
-// ============================================================================
-// GETTERS
-// ============================================================================
 
 export function getLeftController() {
     return leftController;
@@ -448,23 +462,25 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     if (leftController) {
         const picked = processControllerPick(gl, leftController, cubeBuffer, indexBuffer, modelMatrix, pickingProgram, structure, positionBuffer, instanceIDBuffer);
         
-        if (picked && (!lastLeftPick || lastLeftPick.instanceID !== picked.instanceID)) {
-            console.log('👈 LEFT controller hovering:', picked.instanceID, `(${picked.x},${picked.y},${picked.z})`);
-            lastLeftPick = picked;
-        } else if (!picked && lastLeftPick) {
-            console.log('👈 LEFT controller: no hit');
-            lastLeftPick = null;
-        } else if (picked) {
-            lastLeftPick = picked;
-        }
+        lastLeftPick = picked;
+        leftHitDistance = picked ? picked.hitDistance : null;
         
         if (window.leftControllerPickRequested) {
             window.leftControllerPickRequested = false;
-            if (picked && window.addPickedVoxel) {
-                window.addPickedVoxel(picked.instanceID);
-                console.log('✅ LEFT controller SELECTED:', picked.instanceID);
+            if (lastLeftPick && window.addPickedVoxel) {
+                window.addPickedVoxel(lastLeftPick.instanceID);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🎮 LEFT CONTROLLER PICKED VOXEL:');
+                console.log(`   Instance ID: ${lastLeftPick.instanceID}`);
+                console.log(`   Grid Coordinates: (${lastLeftPick.x}, ${lastLeftPick.y}, ${lastLeftPick.z})`);
+                console.log(`   World Position: (${lastLeftPick.worldX.toFixed(3)}, ${lastLeftPick.worldY.toFixed(3)}, ${lastLeftPick.worldZ.toFixed(3)})`);
+                console.log(`   Value: ${lastLeftPick.value}`);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             }
         }
+    } else {
+        lastLeftPick = null;
+        leftHitDistance = null;
     }
     
     if (window.leftControllerPickRequested) {
@@ -474,23 +490,25 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     if (rightController) {
         const picked = processControllerPick(gl, rightController, cubeBuffer, indexBuffer, modelMatrix, pickingProgram, structure, positionBuffer, instanceIDBuffer);
         
-        if (picked && (!lastRightPick || lastRightPick.instanceID !== picked.instanceID)) {
-            console.log('👉 RIGHT controller hovering:', picked.instanceID, `(${picked.x},${picked.y},${picked.z})`);
-            lastRightPick = picked;
-        } else if (!picked && lastRightPick) {
-            console.log('👉 RIGHT controller: no hit');
-            lastRightPick = null;
-        } else if (picked) {
-            lastRightPick = picked;
-        }
+        lastRightPick = picked;
+        rightHitDistance = picked ? picked.hitDistance : null;
         
         if (window.rightControllerPickRequested) {
             window.rightControllerPickRequested = false;
-            if (picked && window.addPickedVoxel) {
-                window.addPickedVoxel(picked.instanceID);
-                console.log('✅ RIGHT controller SELECTED:', picked.instanceID);
+            if (lastRightPick && window.addPickedVoxel) {
+                window.addPickedVoxel(lastRightPick.instanceID);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.log('🎮 RIGHT CONTROLLER PICKED VOXEL:');
+                console.log(`   Instance ID: ${lastRightPick.instanceID}`);
+                console.log(`   Grid Coordinates: (${lastRightPick.x}, ${lastRightPick.y}, ${lastRightPick.z})`);
+                console.log(`   World Position: (${lastRightPick.worldX.toFixed(3)}, ${lastRightPick.worldY.toFixed(3)}, ${lastRightPick.worldZ.toFixed(3)})`);
+                console.log(`   Value: ${lastRightPick.value}`);
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             }
         }
+    } else {
+        lastRightPick = null;
+        rightHitDistance = null;
     }
     
     if (window.rightControllerPickRequested) {
@@ -505,6 +523,3 @@ export function getLastLeftPick() {
 export function getLastRightPick() {
     return lastRightPick;
 }
-
-
-

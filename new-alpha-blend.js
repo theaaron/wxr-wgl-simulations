@@ -9,8 +9,8 @@ import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
 import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks } from "./rendering/vrControllers.js";
 
 
-export const PATH = 'resources/atria_64x64x64.json';
-// export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
+// export const PATH = 'resources/atria_64x64x64.json';
+export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -164,17 +164,11 @@ function initGL() {
     console.log('   Version:', gl.getParameter(gl.VERSION));
     console.log('   GLSL Version:', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
     
-    // Initialize VR controller system
     initVRControllers(gl);
     
-    // Expose addPickedVoxel to window for VR controller integration
+    // expose addPickedVoxel to window for VR controller integration
     window.addPickedVoxel = addPickedVoxel;
-
-    // WebGL 2.0: Multiple Render Targets and Instancing are built-in!
-    console.log('✅ Multiple Render Targets: Built-in');
-    console.log('✅ Instanced Rendering: Built-in');
     
-    // Create compatibility object for instancing (WebGL 2 built-in functions)
     instancingExt = {
         drawElementsInstancedANGLE: (mode, count, type, offset, primcount) => {
             gl.drawElementsInstanced(mode, count, type, offset, primcount);
@@ -208,7 +202,7 @@ function initGL() {
         console.log('✅ Picking program created successfully');
         console.log(`   Program handle: ${pickingProgram}`);
         
-        // Test: Verify attributes exist
+        // verifying attributes exist
         const testPosLoc = gl.getAttribLocation(pickingProgram, 'a_position');
         const testInstPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
         const testInstIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
@@ -241,7 +235,7 @@ function initGL() {
 
     const maxInstances = 1000;
     const instancePositions = new Float32Array(maxInstances * 3);
-    const instanceColors = new Float32Array(maxInstances * 3); // NEW: Random colors
+    const instanceColors = new Float32Array(maxInstances * 3);
     let idx = 0;
     
     const colorPalette = [
@@ -426,7 +420,7 @@ function drawSceneWithApproxBlending(view) {
     if (!drawSceneWithApproxBlending.frameCount) drawSceneWithApproxBlending.frameCount = 0;
     drawSceneWithApproxBlending.frameCount++;
     if (drawSceneWithApproxBlending.frameCount % 60 === 0) {
-        // Reduced logging: console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
+        // logging every 60 frames: console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
     }
     
     const modelMatrix = new Float32Array([
@@ -567,10 +561,9 @@ function onXRFrame(time, frame) {
     
     xrSession.requestAnimationFrame(onXRFrame);
 
-    // Update VR controller poses
     updateControllers(frame, xrReferenceSpace);
     
-    // Process any pending controller picks
+    // process any pending controller picks
     const structure = getStructure();
     if (pickingProgram && structure) {
         const modelMatrix = new Float32Array([
@@ -606,13 +599,13 @@ function onXRFrame(time, frame) {
     if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
     onXRFrame.frameCount++;
     if (onXRFrame.frameCount % 60 === 0) {
-        // Reduced logging: console.log(`onXRFrame: ${pose.views.length} views`);
+        // logging every 60 frames: console.log(`onXRFrame: ${pose.views.length} views`);
     }
     
     for (const view of pose.views) {
         drawSceneWithApproxBlending(view);
         
-        // Render controller rays after scene (so they appear on top)
+        // render controller rays after scene (so they appear on top)
         const viewport = glLayer.getViewport(view);
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
@@ -717,7 +710,7 @@ window.addEventListener('load', async () => {
     
     const canvas = gl.canvas;
     
-    // Mouse click handler for picking
+    // mouse click handler for picking
     canvas.addEventListener('click', (event) => {
         if (!pickingProgram) {
             console.warn('⚠️ Picking program not available');
@@ -733,7 +726,7 @@ window.addEventListener('load', async () => {
         console.log(`   Canvas size: ${canvas.width}×${canvas.height}`);
         console.log(`   Display size: ${rect.width.toFixed(0)}×${rect.height.toFixed(0)}`);
         
-        // Scale mouse coordinates to actual canvas resolution
+        // scale mouse coordinates to actual canvas resolution
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
         const scaledMouseX = mouseX * scaleX;
@@ -766,7 +759,7 @@ window.addEventListener('load', async () => {
             console.log(`   World Position: (${picked.worldX.toFixed(3)}, ${picked.worldY.toFixed(3)}, ${picked.worldZ.toFixed(3)})`);
             console.log(`   Value: ${picked.value}`);
         } else {
-            console.log('❌ No voxel at this location (clicked on background)');
+            console.log(' No voxel at this location (clicked on background)');
         }
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     });
@@ -778,7 +771,6 @@ window.addEventListener('load', async () => {
             const mouseX = event.clientX - rect.left;
             const mouseY = event.clientY - rect.top;
             
-            // Scale coordinates
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             const scaledMouseX = mouseX * scaleX;
