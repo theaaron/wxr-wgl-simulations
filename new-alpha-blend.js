@@ -6,7 +6,7 @@ import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
-import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks } from "./rendering/vrControllers.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform } from "./rendering/vrControllers.js";
 
 
 export const PATH = 'resources/atria_64x64x64.json';
@@ -423,12 +423,7 @@ function drawSceneWithApproxBlending(view) {
         // logging every 60 frames: console.log(`${isLeftEye ? 'LEFT' : 'RIGHT'} eye (view.eye="${view.eye}"): viewport(${x}, ${y}, ${width}x${height})`);
     }
     
-    const modelMatrix = new Float32Array([
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    ]);
+    const modelMatrix = getStructureModelMatrix();
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, xrSession.renderState.baseLayer.framebuffer);
     
@@ -562,21 +557,16 @@ function onXRFrame(time, frame) {
     xrSession.requestAnimationFrame(onXRFrame);
 
     updateControllers(frame, xrReferenceSpace);
+    updateStructureManipulation();
     
     // process any pending controller picks
     const structure = getStructure();
     if (pickingProgram && structure) {
-        const modelMatrix = new Float32Array([
-            1, 0, 0, 0,
-            0, 1, 0, 0,
-            0, 0, 1, 0,
-            0, 0, 0, 1
-        ]);
         checkAndProcessPicks(
             gl,
             cubeBuffer,
             indexBuffer,
-            modelMatrix,
+            getStructureModelMatrix(),
             pickingProgram,
             structure,
             getPositionBuffer(),
@@ -800,10 +790,13 @@ window.addEventListener('load', async () => {
         }
     });
     
-    // clear with ctrl
     window.addEventListener('keydown', (event) => {
         if (event.key === 'c' && !event.ctrlKey && !event.metaKey) {
             clearPickedVoxels();
+        }
+        if (event.key === 'r' && !event.ctrlKey && !event.metaKey) {
+            resetStructureTransform();
+            console.log('🔄 Structure transform reset');
         }
     });
     
@@ -812,7 +805,6 @@ window.addEventListener('load', async () => {
     console.log('✅ Mouse picking handlers registered');
     console.log('💡 Click on voxels to see their ID and coordinates in the console');
     console.log('💡 Picked voxels will turn RED');
-    console.log('💡 Press "c" key to clear all picked voxels');
-    console.log('💡 Or use: clearPickedVoxels() in console');
-    console.log('💡 Hold Shift while moving mouse to preview pickable voxels');
+    console.log('💡 Press "c" to clear picked voxels, "r" to reset structure transform');
+    console.log('💡 In VR: trigger=pick, grip=grab (one hand=move/rotate, both hands=+scale)');
 });

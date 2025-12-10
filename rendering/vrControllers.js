@@ -17,6 +17,26 @@ let rayCylinderIndexCount = 0;
 let leftHitDistance = null;
 let rightHitDistance = null;
 
+// structure manipulation state
+let structureTransform = {
+    position: [0, 0, 0],
+    rotation: new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    scale: 1.0
+};
+
+let grabState = {
+    leftGrabbing: false,
+    rightGrabbing: false,
+    leftMatrixAtGrab: null,
+    rightMatrixAtGrab: null,
+    leftGrabPoint: null,
+    rightGrabPoint: null,
+    structureAtGrab: null,
+    structureOffsetAtGrab: null,
+    initialHandDistance: null,
+    midpointAtGrab: null
+};
+
 const RAY_VS = `#version 300 es
 in vec3 a_position;
 uniform mat4 u_projectionMatrix;
@@ -139,6 +159,9 @@ export function setupControllerInput(session) {
     session.addEventListener('select', onSelect);
     session.addEventListener('selectstart', onSelectStart);
     session.addEventListener('selectend', onSelectEnd);
+    session.addEventListener('squeeze', onSqueeze);
+    session.addEventListener('squeezestart', onSqueezeStart);
+    session.addEventListener('squeezeend', onSqueezeEnd);
 }
 
 function onSelect(event) {
@@ -155,6 +178,66 @@ function onSelect(event) {
 
 function onSelectStart(event) {}
 function onSelectEnd(event) {}
+
+function onSqueeze(event) {}
+
+function onSqueezeStart(event) {
+    const hand = event.inputSource.handedness;
+    
+    if (hand === 'left' && leftController) {
+        grabState.leftGrabbing = true;
+        grabState.leftMatrixAtGrab = new Float32Array(leftController.matrix);
+        grabState.leftGrabPoint = [leftController.origin.x, leftController.origin.y, leftController.origin.z];
+    } else if (hand === 'right' && rightController) {
+        grabState.rightGrabbing = true;
+        grabState.rightMatrixAtGrab = new Float32Array(rightController.matrix);
+        grabState.rightGrabPoint = [rightController.origin.x, rightController.origin.y, rightController.origin.z];
+    }
+    
+    if (grabState.leftGrabbing && grabState.rightGrabbing) {
+        grabState.initialHandDistance = getHandDistance();
+        grabState.midpointAtGrab = getHandMidpoint();
+    }
+    
+    grabState.structureAtGrab = {
+        position: [...structureTransform.position],
+        rotation: new Float32Array(structureTransform.rotation),
+        scale: structureTransform.scale
+    };
+    
+    // store offset from controller to structure at grab time
+    const grabPoint = grabState.leftGrabbing ? 
+        (grabState.leftGrabPoint || [0,0,0]) : 
+        (grabState.rightGrabPoint || [0,0,0]);
+    grabState.structureOffsetAtGrab = [
+        structureTransform.position[0] - grabPoint[0],
+        structureTransform.position[1] - grabPoint[1],
+        structureTransform.position[2] - grabPoint[2]
+    ];
+}
+
+function onSqueezeEnd(event) {
+    const hand = event.inputSource.handedness;
+    if (hand === 'left') grabState.leftGrabbing = false;
+    else if (hand === 'right') grabState.rightGrabbing = false;
+}
+
+function getHandDistance() {
+    if (!leftController || !rightController) return 1;
+    const dx = leftController.origin.x - rightController.origin.x;
+    const dy = leftController.origin.y - rightController.origin.y;
+    const dz = leftController.origin.z - rightController.origin.z;
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+function getHandMidpoint() {
+    if (!leftController || !rightController) return [0, 0, 0];
+    return [
+        (leftController.origin.x + rightController.origin.x) / 2,
+        (leftController.origin.y + rightController.origin.y) / 2,
+        (leftController.origin.z + rightController.origin.z) / 2
+    ];
+}
 
 let pickingFBO = null;
 let pickingTexture = null;
@@ -183,15 +266,16 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     const pickProjMatrix = createPickProjectionMatrix(10);
     const pickViewMatrix = invertMatrix(controller.matrix);
     
-    // must match renderStructure model matrix
+    // combine manipulation matrix with base structure matrix
     const globalScale = 0.02;
     const zScale = 1.0;
-    const actualModelMatrix = new Float32Array([
+    const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,
         0, globalScale, 0, 0,
         0, 0, globalScale * zScale, 0,
         0, 0, -1, 1
     ]);
+    const actualModelMatrix = multiplyMat4(modelMatrix, baseMatrix);
     
     const voxelScale = window.renderStructureVoxelScale || 3.0;
     
@@ -453,6 +537,160 @@ export function getRightController() {
 
 export function hasActiveControllers() {
     return leftController !== null || rightController !== null;
+}
+
+export function updateStructureManipulation() {
+    const leftGrab = grabState.leftGrabbing;
+    const rightGrab = grabState.rightGrabbing;
+    
+    if (!leftGrab && !rightGrab) return;
+    if (!grabState.structureAtGrab) return;
+    
+    if (leftGrab && rightGrab && leftController && rightController) {
+        // two-handed: translate + rotate + scale
+        const currentDistance = getHandDistance();
+        const scaleFactor = currentDistance / grabState.initialHandDistance;
+        structureTransform.scale = grabState.structureAtGrab.scale * scaleFactor;
+        
+        const currentMidpoint = getHandMidpoint();
+        structureTransform.position = [
+            grabState.structureAtGrab.position[0] + (currentMidpoint[0] - grabState.midpointAtGrab[0]),
+            grabState.structureAtGrab.position[1] + (currentMidpoint[1] - grabState.midpointAtGrab[1]),
+            grabState.structureAtGrab.position[2] + (currentMidpoint[2] - grabState.midpointAtGrab[2])
+        ];
+        
+        // rotation from hand vector change
+        const grabVec = [
+            grabState.rightMatrixAtGrab[12] - grabState.leftMatrixAtGrab[12],
+            grabState.rightMatrixAtGrab[13] - grabState.leftMatrixAtGrab[13],
+            grabState.rightMatrixAtGrab[14] - grabState.leftMatrixAtGrab[14]
+        ];
+        const currentVec = [
+            rightController.origin.x - leftController.origin.x,
+            rightController.origin.y - leftController.origin.y,
+            rightController.origin.z - leftController.origin.z
+        ];
+        const rotMatrix = rotationBetweenVectors(grabVec, currentVec);
+        structureTransform.rotation = multiplyMat4(rotMatrix, grabState.structureAtGrab.rotation);
+        
+    } else {
+        // one-handed: translate + rotate, pivoting around hand
+        const controller = leftGrab ? leftController : rightController;
+        const matrixAtGrab = leftGrab ? grabState.leftMatrixAtGrab : grabState.rightMatrixAtGrab;
+        
+        if (!controller || !matrixAtGrab) return;
+        
+        const deltaMatrix = multiplyMat4(controller.matrix, invertMat4(matrixAtGrab));
+        const deltaRot = extractRotation(deltaMatrix);
+        
+        // rotate the offset from hand to structure, then add to current hand position
+        const offset = grabState.structureOffsetAtGrab || [0, 0, 0];
+        const rotatedOffset = transformVec3(deltaRot, offset);
+        
+        structureTransform.position = [
+            controller.origin.x + rotatedOffset[0],
+            controller.origin.y + rotatedOffset[1],
+            controller.origin.z + rotatedOffset[2]
+        ];
+        
+        structureTransform.rotation = multiplyMat4(deltaRot, grabState.structureAtGrab.rotation);
+    }
+}
+
+export function getStructureModelMatrix() {
+    const m = new Float32Array(16);
+    const pos = structureTransform.position;
+    const rot = structureTransform.rotation;
+    const s = structureTransform.scale;
+    
+    // scale the rotation part
+    m[0] = rot[0] * s;  m[1] = rot[1] * s;  m[2] = rot[2] * s;   m[3] = 0;
+    m[4] = rot[4] * s;  m[5] = rot[5] * s;  m[6] = rot[6] * s;   m[7] = 0;
+    m[8] = rot[8] * s;  m[9] = rot[9] * s;  m[10] = rot[10] * s; m[11] = 0;
+    m[12] = pos[0];     m[13] = pos[1];     m[14] = pos[2];      m[15] = 1;
+    
+    return m;
+}
+
+export function resetStructureTransform() {
+    structureTransform.position = [0, 0, 0];
+    structureTransform.rotation = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+    structureTransform.scale = 1.0;
+}
+
+// matrix math helpers (column-major for WebGL)
+function multiplyMat4(a, b) {
+    const out = new Float32Array(16);
+    for (let col = 0; col < 4; col++) {
+        for (let row = 0; row < 4; row++) {
+            out[col*4+row] = a[row]*b[col*4] + a[4+row]*b[col*4+1] + a[8+row]*b[col*4+2] + a[12+row]*b[col*4+3];
+        }
+    }
+    return out;
+}
+
+function invertMat4(m) {
+    const out = new Float32Array(16);
+    // transpose rotation
+    out[0] = m[0]; out[1] = m[4]; out[2] = m[8];  out[3] = 0;
+    out[4] = m[1]; out[5] = m[5]; out[6] = m[9];  out[7] = 0;
+    out[8] = m[2]; out[9] = m[6]; out[10] = m[10]; out[11] = 0;
+    // transform translation
+    const tx = -m[12], ty = -m[13], tz = -m[14];
+    out[12] = tx*out[0] + ty*out[4] + tz*out[8];
+    out[13] = tx*out[1] + ty*out[5] + tz*out[9];
+    out[14] = tx*out[2] + ty*out[6] + tz*out[10];
+    out[15] = 1;
+    return out;
+}
+
+function extractRotation(m) {
+    const out = new Float32Array(16);
+    out[0] = m[0]; out[1] = m[1]; out[2] = m[2];  out[3] = 0;
+    out[4] = m[4]; out[5] = m[5]; out[6] = m[6];  out[7] = 0;
+    out[8] = m[8]; out[9] = m[9]; out[10] = m[10]; out[11] = 0;
+    out[12] = 0;   out[13] = 0;   out[14] = 0;     out[15] = 1;
+    return out;
+}
+
+function transformVec3(m, v) {
+    return [
+        m[0]*v[0] + m[4]*v[1] + m[8]*v[2],
+        m[1]*v[0] + m[5]*v[1] + m[9]*v[2],
+        m[2]*v[0] + m[6]*v[1] + m[10]*v[2]
+    ];
+}
+
+function rotationBetweenVectors(from, to) {
+    const out = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+    
+    // normalize
+    const fromLen = Math.sqrt(from[0]*from[0] + from[1]*from[1] + from[2]*from[2]);
+    const toLen = Math.sqrt(to[0]*to[0] + to[1]*to[1] + to[2]*to[2]);
+    if (fromLen < 0.0001 || toLen < 0.0001) return out;
+    
+    const fx = from[0]/fromLen, fy = from[1]/fromLen, fz = from[2]/fromLen;
+    const tx = to[0]/toLen, ty = to[1]/toLen, tz = to[2]/toLen;
+    
+    // cross product for axis
+    const cx = fy*tz - fz*ty;
+    const cy = fz*tx - fx*tz;
+    const cz = fx*ty - fy*tx;
+    
+    const dot = fx*tx + fy*ty + fz*tz;
+    const axisLen = Math.sqrt(cx*cx + cy*cy + cz*cz);
+    
+    if (axisLen < 0.0001) return out;
+    
+    const ax = cx/axisLen, ay = cy/axisLen, az = cz/axisLen;
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+    const c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
+    
+    out[0] = t*ax*ax + c;      out[1] = t*ax*ay + s*az;  out[2] = t*ax*az - s*ay;
+    out[4] = t*ax*ay - s*az;   out[5] = t*ay*ay + c;     out[6] = t*ay*az + s*ax;
+    out[8] = t*ax*az + s*ay;   out[9] = t*ay*az - s*ax;  out[10] = t*az*az + c;
+    
+    return out;
 }
 
 let lastLeftPick = null;

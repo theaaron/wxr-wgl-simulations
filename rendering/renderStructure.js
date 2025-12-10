@@ -2,8 +2,18 @@ import { PATH } from '../new-alpha-blend.js';
 import { loadStructure } from './loadStructure.js';
 
 // ============================================================================
-// HELPER FUNCTIONS FOR PICKING
+// HELPER FUNCTIONS
 // ============================================================================
+
+function multiplyMat4(a, b) {
+    const out = new Float32Array(16);
+    for (let col = 0; col < 4; col++) {
+        for (let row = 0; row < 4; row++) {
+            out[col*4+row] = a[row]*b[col*4] + a[4+row]*b[col*4+1] + a[8+row]*b[col*4+2] + a[12+row]*b[col*4+3];
+        }
+    }
+    return out;
+}
 
 const pickedVoxels = new Set();
 
@@ -190,13 +200,14 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
 
     const globalScale = 0.02; 
     const zScale = renderStructure.zScale || 1.0;
-    modelMatrix = new Float32Array([
+    const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,      
         0, globalScale, 0, 0,      
-        0, 0, globalScale * zScale, 0, // z scale not needed anymore but i'll leave it here for now
+        0, 0, globalScale * zScale, 0,
         0, 0, -1, 1     
     ]);
-    gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
+    const finalMatrix = multiplyMat4(modelMatrix, baseMatrix);
+    gl.uniformMatrix4fv(modelLoc, false, finalMatrix);
     
 
     const voxelSize = renderStructure.voxelScale || 3.0;
@@ -376,13 +387,14 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
     
     const globalScale = 0.02;
     const zScale = renderStructure.zScale || 1.0;
-    modelMatrix = new Float32Array([
+    const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,
         0, globalScale, 0, 0,
         0, 0, globalScale * zScale, 0,
         0, 0, -1, 1
     ]);
-    gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
+    const finalMatrix = multiplyMat4(modelMatrix, baseMatrix);
+    gl.uniformMatrix4fv(modelLoc, false, finalMatrix);
     
     const voxelSize = renderStructure.voxelScale || 3.0;
     if (cubeScaleLoc !== null) {
