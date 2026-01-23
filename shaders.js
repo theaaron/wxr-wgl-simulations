@@ -26,11 +26,13 @@ export const FS_SOURCE = `#version 300 es
 export const SIMPLE_VS = `#version 300 es
     in vec3 a_position;
     in vec3 a_instancePosition;
+    in vec3 a_instanceNormal;
     in vec3 a_color;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
+    uniform mat4 u_normalMatrix;
     uniform float u_cubeScale;
     
     out vec3 v_position;
@@ -41,10 +43,13 @@ export const SIMPLE_VS = `#version 300 es
         vec3 scaledCubeVertex = a_position * u_cubeScale;
         vec3 pos = scaledCubeVertex + a_instancePosition;
         vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
-        gl_Position = u_projectionMatrix * u_viewMatrix * worldPos;
+        vec4 viewPos = u_viewMatrix * worldPos;
+        gl_Position = u_projectionMatrix * viewPos;
         
-        v_position = worldPos.xyz;
-        v_normal = a_position;
+        // position in view space for specular calculation
+        v_position = viewPos.xyz;
+        // transform normal using normalMatrix (inverse-transpose of modelView)
+        v_normal = mat3(u_normalMatrix) * a_instanceNormal;
         v_color = a_color;
     }
 `;
@@ -54,9 +59,8 @@ export const SIMPLE_FS = `#version 300 es
     
     uniform int u_useVertexColor;
     uniform mat4 u_viewMatrix;
-    uniform mat4 u_modelMatrix;
     
-    // light properties
+    // light properties (in view space)
     uniform vec3 u_lightDirection;
     uniform vec3 u_lightColor;
     uniform vec3 u_lightAmbient;
@@ -67,20 +71,22 @@ export const SIMPLE_FS = `#version 300 es
     uniform vec3 u_materialSpecular;
     uniform float u_shininess;
     
-    in vec3 v_position;
-    in vec3 v_normal;
+    in vec3 v_position;  // in view space
+    in vec3 v_normal;    // transformed by normalMatrix
     in vec3 v_color;
     
     out vec4 fragColor;
     
     void main() {
         vec3 N = normalize(v_normal);
-        vec3 E = normalize(-v_position);
-        vec3 L = normalize(u_lightDirection);
+        vec3 E = normalize(-v_position);  // eye vector in view space
+        
+        // transform light direction to view space so it stays fixed relative to viewer
+        vec3 L = normalize(mat3(u_viewMatrix) * u_lightDirection);
         vec3 R = reflect(L, N);
         float lambertTerm = dot(N, -L);
         
-        vec3 materialColor = (u_useVertexColor == 1) ? v_color : abs(normalize(v_position));
+        vec3 materialColor = (u_useVertexColor == 1) ? v_color : vec3(0.9, 0.9, 0.9);
         
         // ambient
         vec3 Ia = u_lightAmbient * u_materialAmbient * materialColor;
@@ -184,11 +190,13 @@ export const BLEND_FS = `#version 300 es
 export const APPROX_VS = `#version 300 es
     in vec3 a_position;
     in vec3 a_instancePosition;
+    in vec3 a_instanceNormal;
     in vec3 a_color;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
     uniform mat4 u_modelMatrix;
+    uniform mat4 u_normalMatrix;
     uniform float u_cubeScale;
     
     out vec3 v_position;
@@ -200,11 +208,14 @@ export const APPROX_VS = `#version 300 es
         vec3 scaledCubeVertex = a_position * u_cubeScale;
         vec3 pos = scaledCubeVertex + a_instancePosition;
         vec4 worldPos = u_modelMatrix * vec4(pos, 1.0);
-        vec4 clipPos = u_projectionMatrix * u_viewMatrix * worldPos;
+        vec4 viewPos = u_viewMatrix * worldPos;
+        vec4 clipPos = u_projectionMatrix * viewPos;
         gl_Position = clipPos;
         
-        v_position = worldPos.xyz;
-        v_normal = a_position;
+        // position in view space for specular calculation
+        v_position = viewPos.xyz;
+        // transform normal using normalMatrix (inverse-transpose of modelView)
+        v_normal = mat3(u_normalMatrix) * a_instanceNormal;
         v_color = a_color;
         v_depth = clipPos.z / clipPos.w * 0.5 + 0.5;
     }
@@ -216,9 +227,8 @@ export const APPROX_FS = `#version 300 es
     uniform float u_alpha;
     uniform int u_useVertexColor;
     uniform mat4 u_viewMatrix;
-    uniform mat4 u_modelMatrix;
     
-    // light properties
+    // light properties (in view space)
     uniform vec3 u_lightDirection;
     uniform vec3 u_lightColor;
     uniform vec3 u_lightAmbient;
@@ -229,8 +239,8 @@ export const APPROX_FS = `#version 300 es
     uniform vec3 u_materialSpecular;
     uniform float u_shininess;
     
-    in vec3 v_position;
-    in vec3 v_normal;
+    in vec3 v_position;  // in view space
+    in vec3 v_normal;    // transformed by normalMatrix
     in vec3 v_color;
     in float v_depth;
     
@@ -239,12 +249,15 @@ export const APPROX_FS = `#version 300 es
     
     void main() {
         vec3 N = normalize(v_normal);
-        vec3 E = normalize(-v_position);
-        vec3 L = normalize(u_lightDirection);
+        vec3 E = normalize(-v_position);  // eye vector in view space
+        
+        // transform light direction to view space so it stays fixed relative to viewer
+        vec3 L = normalize(mat3(u_viewMatrix) * u_lightDirection);
         vec3 R = reflect(L, N);
         float lambertTerm = dot(N, -L);
         
-        vec3 materialColor = (u_useVertexColor == 1) ? v_color : abs(normalize(v_position));
+        // use vertex color if set, otherwise neutral gray like Abubu
+        vec3 materialColor = (u_useVertexColor == 1) ? v_color : vec3(0.9, 0.9, 0.9);
         
         // ambient
         vec3 Ia = u_lightAmbient * u_materialAmbient * materialColor;
@@ -304,21 +317,14 @@ export const APPROX_COMPOSITE_FS = `#version 300 es
             return;
         }
         
-        // recover average color
         vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
         
-        // unused for now, might use later for better transparency
-        float avgTransmittance = sumTransmittance / max(accum.a, 0.00001);
-        
-        // calculate opacity - more layers = more opaque
         float absorption = 1.0 - exp(-accum.a * 2.5);
         float opacity = clamp(absorption, 0.0, 1.0);
         
-        // darken based on number of layers
         float darkening = exp(-accum.a * 0.2);
         vec3 darkenedColor = avgColor * darkening;
         
-        // at high alpha, skip darkening to preserve color
         if (accum.a > 10.0) {
             darkenedColor = avgColor;
         }

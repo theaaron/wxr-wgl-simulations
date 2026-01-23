@@ -1,6 +1,13 @@
 // vr controller input and ray visualization
 import { pickVoxel } from './renderStructure.js';
 
+// pacing callback - set by main app
+let paceCallback = null;
+
+export function setPaceCallback(callback) {
+    paceCallback = callback;
+}
+
 const RAY_LENGTH = 5.0;
 const RAY_COLOR = [0.5, 0.5, 0.5];
 const RAY_HIT_COLOR = [0.0, 1.0, 0.0];
@@ -168,11 +175,33 @@ function onSelect(event) {
     const inputSource = event.inputSource;
     
     if (inputSource.targetRayMode === 'tracked-pointer') {
-        if (inputSource.handedness === 'left' && leftController) {
-            performGPUPick(leftController);
-        } else if (inputSource.handedness === 'right' && rightController) {
-            performGPUPick(rightController);
+        const hand = inputSource.handedness;
+        const isGrabbing = (hand === 'left' && grabState.leftGrabbing) || 
+                          (hand === 'right' && grabState.rightGrabbing);
+        
+        if (isGrabbing && paceCallback) {
+            // grip + trigger = pace at ray intersection
+            if (hand === 'left' && leftController) {
+                requestPaceAtRay(leftController);
+            } else if (hand === 'right' && rightController) {
+                requestPaceAtRay(rightController);
+            }
+        } else {
+            // trigger only = pick voxel
+            if (hand === 'left' && leftController) {
+                performGPUPick(leftController);
+            } else if (hand === 'right' && rightController) {
+                performGPUPick(rightController);
+            }
         }
+    }
+}
+
+function requestPaceAtRay(controller) {
+    if (controller.handedness === 'left') {
+        window.leftControllerPaceRequested = true;
+    } else if (controller.handedness === 'right') {
+        window.rightControllerPaceRequested = true;
     }
 }
 
@@ -277,7 +306,7 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     ]);
     const actualModelMatrix = multiplyMat4(modelMatrix, baseMatrix);
     
-    const voxelScale = window.renderStructureVoxelScale || 3.0;
+    const voxelScale = window.renderStructureVoxelScale || 5.0;
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, pickingFBO);
     gl.viewport(0, 0, PICK_RESOLUTION, PICK_RESOLUTION);
@@ -716,6 +745,15 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
                 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             }
         }
+        
+        // pacing: grip + trigger
+        if (window.leftControllerPaceRequested) {
+            window.leftControllerPaceRequested = false;
+            if (lastLeftPick && paceCallback) {
+                paceCallback(lastLeftPick.x, lastLeftPick.y, lastLeftPick.z);
+                console.log(`⚡ LEFT CONTROLLER PACED at (${lastLeftPick.x}, ${lastLeftPick.y}, ${lastLeftPick.z})`);
+            }
+        }
     } else {
         lastLeftPick = null;
         leftHitDistance = null;
@@ -723,6 +761,9 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     
     if (window.leftControllerPickRequested) {
         window.leftControllerPickRequested = false;
+    }
+    if (window.leftControllerPaceRequested) {
+        window.leftControllerPaceRequested = false;
     }
     
     if (rightController) {
@@ -744,6 +785,15 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
                 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             }
         }
+        
+        // pacing: grip + trigger
+        if (window.rightControllerPaceRequested) {
+            window.rightControllerPaceRequested = false;
+            if (lastRightPick && paceCallback) {
+                paceCallback(lastRightPick.x, lastRightPick.y, lastRightPick.z);
+                console.log(`⚡ RIGHT CONTROLLER PACED at (${lastRightPick.x}, ${lastRightPick.y}, ${lastRightPick.z})`);
+            }
+        }
     } else {
         lastRightPick = null;
         rightHitDistance = null;
@@ -751,6 +801,9 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     
     if (window.rightControllerPickRequested) {
         window.rightControllerPickRequested = false;
+    }
+    if (window.rightControllerPaceRequested) {
+        window.rightControllerPaceRequested = false;
     }
 }
 

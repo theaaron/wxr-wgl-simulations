@@ -1,16 +1,58 @@
 import { cubeSize, indices, vertices } from "./cube.js";
 import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
-import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure } from "./rendering/renderStructure.js";
+import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
-import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform } from "./rendering/vrControllers.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback } from "./rendering/vrControllers.js";
+import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
+import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 
+// simple mat4 utility for non-VR rendering
+const mat4 = {
+    create: function() {
+        const out = new Float32Array(16);
+        out[0] = out[5] = out[10] = out[15] = 1;
+        return out;
+    },
+    perspective: function(out, fovy, aspect, near, far) {
+        const f = 1.0 / Math.tan(fovy / 2);
+        out[0] = f / aspect;
+        out[1] = out[2] = out[3] = 0;
+        out[4] = 0; out[5] = f; out[6] = out[7] = 0;
+        out[8] = out[9] = 0;
+        out[10] = (far + near) / (near - far);
+        out[11] = -1;
+        out[12] = out[13] = 0;
+        out[14] = (2 * far * near) / (near - far);
+        out[15] = 0;
+        return out;
+    },
+    lookAt: function(out, eye, center, up) {
+        const zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+        let len = Math.sqrt(zx*zx + zy*zy + zz*zz);
+        const z = [zx/len, zy/len, zz/len];
+        const xx = up[1]*z[2] - up[2]*z[1];
+        const xy = up[2]*z[0] - up[0]*z[2];
+        const xz = up[0]*z[1] - up[1]*z[0];
+        len = Math.sqrt(xx*xx + xy*xy + xz*xz);
+        const x = [xx/len, xy/len, xz/len];
+        const y = [z[1]*x[2] - z[2]*x[1], z[2]*x[0] - z[0]*x[2], z[0]*x[1] - z[1]*x[0]];
+        out[0] = x[0]; out[1] = y[0]; out[2] = z[0]; out[3] = 0;
+        out[4] = x[1]; out[5] = y[1]; out[6] = z[1]; out[7] = 0;
+        out[8] = x[2]; out[9] = y[2]; out[10] = z[2]; out[11] = 0;
+        out[12] = -(x[0]*eye[0] + x[1]*eye[1] + x[2]*eye[2]);
+        out[13] = -(y[0]*eye[0] + y[1]*eye[1] + y[2]*eye[2]);
+        out[14] = -(z[0]*eye[0] + z[1]*eye[1] + z[2]*eye[2]);
+        out[15] = 1;
+        return out;
+    }
+};
 
-export const PATH = 'resources/atria_64x64x64.json';
-// export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
+// export const PATH = 'resources/atria_64x64x64.json';
+export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -20,7 +62,7 @@ function compileShader(gl, source, type, debugName = '') {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error(`❌ Shader compile error (${debugName}):`, gl.getShaderInfoLog(shader));
+        console.error(`Shader compile error (${debugName}):`, gl.getShaderInfoLog(shader));
         console.error('Shader source:', source.substring(0, 300));
         gl.deleteShader(shader);
         return null;
@@ -32,7 +74,7 @@ function createProgram(gl, vsSource, fsSource, debugName = '') {
     const vertexShader = compileShader(gl, vsSource, gl.VERTEX_SHADER, `${debugName} VS`);
     const fragmentShader = compileShader(gl, fsSource, gl.FRAGMENT_SHADER, `${debugName} FS`);
     if (!vertexShader || !fragmentShader) {
-        console.error(`❌ Failed to compile shaders for ${debugName}`);
+        console.error(`Failed to compile shaders for ${debugName}`);
         return null;
     }
     
@@ -42,7 +84,7 @@ function createProgram(gl, vsSource, fsSource, debugName = '') {
     gl.linkProgram(program);
     
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error(`❌ Program link error (${debugName}):`, gl.getProgramInfoLog(program));
+        console.error(`Program link error (${debugName}):`, gl.getProgramInfoLog(program));
         gl.deleteProgram(program);
         return null;
     }
@@ -98,6 +140,11 @@ let simpleProgram = null;
 let pickingProgram = null;
 
 let cubeBuffer = null;
+
+// cardiac simulation state
+let simulationInitialized = false;
+let voxelToTexelMap = null;
+let simulationRunning = false;
 let cubeColorBuffer = null; 
 let indexBuffer = null;
 let instanceBuffer = null;
@@ -160,9 +207,13 @@ function initGL() {
         return false;
     }
     
-    console.log('✅ WebGL 2.0 context created');
-    console.log('   Version:', gl.getParameter(gl.VERSION));
-    console.log('   GLSL Version:', gl.getParameter(gl.SHADING_LANGUAGE_VERSION));
+    // enable float texture rendering for simulation ping-pong buffers
+    const floatBufferExt = gl.getExtension('EXT_color_buffer_float');
+    if (!floatBufferExt) {
+        console.warn('EXT_color_buffer_float not available - simulation may not work');
+    }
+    
+    console.log('WebGL 2.0 context created');
     
     initVRControllers(gl);
     
@@ -197,20 +248,7 @@ function initGL() {
     
     pickingProgram = createProgram(gl, PICKER_VS_SIMPLE, PICKER_FS, 'Picking');
     if (!pickingProgram) {
-        console.error('❌ Failed to create picking shader program - picking will be disabled');
-    } else {
-        console.log('✅ Picking program created successfully');
-        console.log(`   Program handle: ${pickingProgram}`);
-        
-        // verifying attributes exist
-        const testPosLoc = gl.getAttribLocation(pickingProgram, 'a_position');
-        const testInstPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
-        const testInstIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
-        console.log(`   Attribute locations: a_position=${testPosLoc}, a_instancePosition=${testInstPosLoc}, a_instanceID=${testInstIDLoc}`);
-        
-        if (testInstIDLoc < 0) {
-            console.error('   ❌ WARNING: a_instanceID attribute not found! Picking will not work correctly.');
-        }
+        console.error('Failed to create picking shader program');
     }
 
     if (drawBuffersExt) {
@@ -267,12 +305,6 @@ function initGL() {
     
     instanceCount = idx / 3;
     
-    console.log(`Generated ${instanceCount} cubes with random colors`);
-    console.log(`First 3 cube colors:`, 
-        instanceColors.slice(0, 3),
-        instanceColors.slice(3, 6),
-        instanceColors.slice(6, 9)
-    );
     
     instanceBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
@@ -465,7 +497,6 @@ function drawSceneWithApproxBlending(view) {
                            textureSet.accumTexture.height !== height;
     
     if (needsRecreation) {
-        console.log(`Creating approx ${isLeftEye ? 'LEFT' : 'RIGHT'} eye textures: ${width}x${height}`);
         setupApproxTextures(textureSet, width, height);
     }
     
@@ -494,8 +525,6 @@ function drawSceneWithApproxBlending(view) {
     const alphaLoc = gl.getUniformLocation(approxProgram, 'u_alpha');
     
     if (!drawSceneWithApproxBlending.loggedAlpha) {
-        console.log('ALPHA constant:', ALPHA);
-        console.log('Alpha uniform location:', alphaLoc);
         drawSceneWithApproxBlending.loggedAlpha = true;
     }
     
@@ -554,6 +583,9 @@ function drawSceneWithApproxBlending(view) {
 function onXRFrame(time, frame) {
     if (!xrSession) return;
     
+    if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
+    onXRFrame.frameCount++;
+    
     xrSession.requestAnimationFrame(onXRFrame);
 
     updateControllers(frame, xrReferenceSpace);
@@ -573,6 +605,39 @@ function onXRFrame(time, frame) {
             getInstanceIDBuffer()
         );
     }
+    
+    // initialize simulation once structure is loaded
+    if (structure && !simulationInitialized) {
+        try {
+            initCardiacSimulation(gl, structure);
+            voxelToTexelMap = buildVoxelToTexelMap(structure);
+            simulationInitialized = true;
+            
+            // set up VR pacing callback
+            setPaceCallback((x, y, z) => {
+                paceAt(x, y, z, 8);
+            });
+            
+            console.log('Cardiac simulation initialized in XR frame');
+        } catch (e) {
+            console.error('Failed to initialize simulation:', e);
+            simulationInitialized = true; // prevent retry spam
+        }
+    }
+    
+    // run simulation steps and update colors (only if FBOs work)
+    if (simulationInitialized && isSimulationWorking() && simulationRunning) {
+        stepSimulation(getStepsPerFrame());
+        
+        // update voltage colors
+        if (structure && voxelToTexelMap) {
+            const voltageData = readVoltageData();
+            if (voltageData) {
+                const colors = voltageToColors(voltageData, structure.voxels.length, voxelToTexelMap);
+                setVoltageColors(colors);
+            }
+        }
+    }
 
     const pose = frame.getViewerPose(xrReferenceSpace);
     if (!pose) return;
@@ -585,12 +650,6 @@ function onXRFrame(time, frame) {
     gl.clearColor(1.0, 1.0, 1.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
-    // debug: log view count every 60 frames
-    if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
-    onXRFrame.frameCount++;
-    if (onXRFrame.frameCount % 60 === 0) {
-        // logging every 60 frames: console.log(`onXRFrame: ${pose.views.length} views`);
-    }
     
     for (const view of pose.views) {
         drawSceneWithApproxBlending(view);
@@ -667,7 +726,6 @@ window.addEventListener('load', async () => {
         scaleSlider.addEventListener('input', (e) => {
             renderStructure.voxelScale = parseFloat(e.target.value);
             scaleValue.textContent = parseFloat(e.target.value).toFixed(1);
-            console.log(`Voxel scale set to: ${renderStructure.voxelScale}x`);
         });
     }
 
@@ -703,7 +761,7 @@ window.addEventListener('load', async () => {
     // mouse click handler for picking
     canvas.addEventListener('click', (event) => {
         if (!pickingProgram) {
-            console.warn('⚠️ Picking program not available');
+            console.warn('Picking program not available');
             return;
         }
         
@@ -711,22 +769,15 @@ window.addEventListener('load', async () => {
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
         
-        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(`🖱️ Click at screen position: (${mouseX.toFixed(0)}, ${mouseY.toFixed(0)})`);
-        console.log(`   Canvas size: ${canvas.width}×${canvas.height}`);
-        console.log(`   Display size: ${rect.width.toFixed(0)}×${rect.height.toFixed(0)}`);
-        
         // scale mouse coordinates to actual canvas resolution
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
         const scaledMouseX = mouseX * scaleX;
         const scaledMouseY = mouseY * scaleY;
         
-        console.log(`   Scaled to canvas: (${scaledMouseX.toFixed(0)}, ${scaledMouseY.toFixed(0)})`);
-        
         const projMatrix = window.lastProjMatrix || mat4.create();
         const viewMatrix = window.lastViewMatrix || mat4.create();
-        const modelMatrix = new Float32Array(16);
+        const modelMatrix = getStructureModelMatrix();
         
         const picked = pickVoxel(
             gl, 
@@ -743,15 +794,8 @@ window.addEventListener('load', async () => {
         );
         
         if (picked) {
-            console.log('.  PICKED VOXEL:');
-            console.log(`   Instance ID: ${picked.instanceID}`);
-            console.log(`   Grid Coordinates: (${picked.x}, ${picked.y}, ${picked.z})`);
-            console.log(`   World Position: (${picked.worldX.toFixed(3)}, ${picked.worldY.toFixed(3)}, ${picked.worldZ.toFixed(3)})`);
-            console.log(`   Value: ${picked.value}`);
-        } else {
-            console.log(' No voxel at this location (clicked on background)');
+            console.log(`Picked voxel #${picked.instanceID} at (${picked.x}, ${picked.y}, ${picked.z})`);
         }
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     });
     
     // hold shift to continuously select voxels
@@ -768,7 +812,7 @@ window.addEventListener('load', async () => {
             
             const projMatrix = window.lastProjMatrix || mat4.create();
             const viewMatrix = window.lastViewMatrix || mat4.create();
-            const modelMatrix = new Float32Array(16);
+            const modelMatrix = getStructureModelMatrix();
             
             const picked = pickVoxel(
                 gl, 
@@ -796,15 +840,110 @@ window.addEventListener('load', async () => {
         }
         if (event.key === 'r' && !event.ctrlKey && !event.metaKey) {
             resetStructureTransform();
-            console.log('🔄 Structure transform reset');
+            console.log('Structure transform reset');
+        }
+        // simulation controls
+        if (event.key === ' ' && !event.ctrlKey && !event.metaKey) {
+            simulationRunning = !simulationRunning;
+            setRunning(simulationRunning);
+            console.log(simulationRunning ? 'Simulation running' : 'Simulation paused');
+        }
+        if (event.key === 'p' && !event.ctrlKey && !event.metaKey) {
+            // pace at center of structure
+            const structure = getStructure();
+            if (structure && simulationInitialized) {
+                // compute center of mass of actual voxels (not grid center - structure may be hollow)
+                const voxels = structure.voxels;
+                let sumX = 0, sumY = 0, sumZ = 0;
+                for (const v of voxels) {
+                    sumX += v.x;
+                    sumY += v.y;
+                    sumZ += v.z;
+                }
+                const cx = Math.floor(sumX / voxels.length);
+                const cy = Math.floor(sumY / voxels.length);
+                const cz = Math.floor(sumZ / voxels.length);
+                paceAt(cx, cy, cz, 10);
+            }
         }
     });
     
     window.clearPickedVoxels = clearPickedVoxels;
     
-    console.log('✅ Mouse picking handlers registered');
-    console.log('💡 Click on voxels to see their ID and coordinates in the console');
-    console.log('💡 Picked voxels will turn RED');
-    console.log('💡 Press "c" to clear picked voxels, "r" to reset structure transform');
-    console.log('💡 In VR: trigger=pick, grip=grab (one hand=move/rotate, both hands=+scale)');
+    console.log('Controls: click=pick, c=clear, r=reset, SPACE=sim, p=pace');
+    
+    // non-VR render loop for desktop testing
+    function nonVRLoop() {
+        requestAnimationFrame(nonVRLoop);
+        
+        // skip if XR session is active
+        if (xrSession) return;
+        
+        const structure = getStructure();
+        
+        // initialize simulation once structure is loaded
+        if (structure && !simulationInitialized) {
+            try {
+                initCardiacSimulation(gl, structure);
+                voxelToTexelMap = buildVoxelToTexelMap(structure);
+                simulationInitialized = true;
+                console.log('Cardiac simulation initialized in non-VR mode');
+            } catch (e) {
+                console.error('Failed to initialize simulation:', e);
+                simulationInitialized = true;
+            }
+        }
+        
+        // run simulation and update colors
+        if (simulationInitialized && isSimulationWorking() && simulationRunning) {
+            stepSimulation(getStepsPerFrame());
+            
+            if (structure && voxelToTexelMap) {
+                const voltageData = readVoltageData();
+                if (voltageData) {
+                    const colors = voltageToColors(voltageData, structure.voxels.length, voxelToTexelMap);
+                    setVoltageColors(colors);
+                }
+            }
+        }
+        
+        // simple 2D render for desktop preview
+        if (structure) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(1.0, 1.0, 1.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            
+            // create simple view/proj matrices for non-VR viewing
+            const aspect = gl.canvas.width / gl.canvas.height;
+            const projMatrix = mat4.create();
+            mat4.perspective(projMatrix, Math.PI / 4, aspect, 0.1, 100);
+            
+            const viewMatrix = mat4.create();
+            mat4.lookAt(viewMatrix, [0, 0, 4], [0, 0, 0], [0, 1, 0]);
+            
+            // store for picking
+            window.lastProjMatrix = projMatrix;
+            window.lastViewMatrix = viewMatrix;
+            
+            const modelMatrix = getStructureModelMatrix();
+            
+            // render with simple program (no approximate blending needed for non-VR)
+            gl.enable(gl.DEPTH_TEST);
+            gl.disable(gl.BLEND);
+            
+            renderStructure(
+                gl,
+                instancingExt,
+                simpleProgram,
+                cubeBuffer,
+                indexBuffer,
+                viewMatrix,
+                projMatrix,
+                modelMatrix
+            );
+        }
+    }
+    
+    nonVRLoop();
 });
