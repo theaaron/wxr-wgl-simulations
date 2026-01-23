@@ -51,8 +51,8 @@ const mat4 = {
     }
 };
 
-// export const PATH = 'resources/atria_64x64x64.json';
-export const PATH = 'resources/13-350um-192x192x192_lra_grid.json';
+// export const PATH = './resources/atria_64x64x64.json';
+export const PATH = './resources/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
