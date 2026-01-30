@@ -337,7 +337,16 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
     if (shininessLoc !== null) gl.uniform1f(shininessLoc, 10.0);
     
 
-    const globalScale = 0.02; 
+    // dynamic globalScale based on structure dimensions
+    // base: 192x192x192 at 0.02 = 3.84 world units
+    // scale smaller structures up to maintain similar visual size
+    const maxDim = Math.max(structure.dimensions.nx, structure.dimensions.ny, structure.dimensions.nz);
+    const globalScale = 0.02 * (192 / maxDim);
+    
+    // expose globalScale for vr controller picking
+    window.renderStructureGlobalScale = globalScale;
+    window.renderStructureDimensions = structure.dimensions;
+    
     const zScale = renderStructure.zScale || 1.0;
     const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,      
@@ -547,7 +556,9 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
     gl.uniformMatrix4fv(projLoc, false, projMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
     
-    const globalScale = 0.02;
+    // use dynamic globalScale from window (set by render function)
+    const maxDim = Math.max(structure.dimensions.nx, structure.dimensions.ny, structure.dimensions.nz);
+    const globalScale = 0.02 * (192 / maxDim);
     const zScale = renderStructure.zScale || 1.0;
     const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,

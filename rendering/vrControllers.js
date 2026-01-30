@@ -296,7 +296,8 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     const pickViewMatrix = invertMatrix(controller.matrix);
     
     // combine manipulation matrix with base structure matrix
-    const globalScale = 0.02;
+    // use dynamic globalScale from window (set by renderStructure)
+    const globalScale = window.renderStructureGlobalScale || 0.02;
     const zScale = 1.0;
     const baseMatrix = new Float32Array([
         globalScale, 0, 0, 0,
