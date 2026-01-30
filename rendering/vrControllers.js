@@ -382,14 +382,21 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     
     const voxel = structure.voxels[instanceID];
     
-    // calculate world position (same as renderStructure)
+    // calculate local position (before model matrix transformation)
     const centerVoxX = structure.dimensions.nx / 2;
     const centerVoxY = structure.dimensions.ny / 2;
     const centerVoxZ = structure.dimensions.nz / 2;
     
-    const voxelWorldX = (voxel.x - centerVoxX) * globalScale;
-    const voxelWorldY = (voxel.y - centerVoxY) * globalScale;
-    const voxelWorldZ = (voxel.z - centerVoxZ) * globalScale - 1;
+    const localX = voxel.x - centerVoxX;
+    const localY = voxel.y - centerVoxY;
+    const localZ = voxel.z - centerVoxZ;
+    
+    // transform through full model matrix (actualModelMatrix = modelMatrix * baseMatrix)
+    // This accounts for VR grab transformations (rotation, translation, scale)
+    const m = actualModelMatrix;
+    const voxelWorldX = m[0] * localX + m[4] * localY + m[8] * localZ + m[12];
+    const voxelWorldY = m[1] * localX + m[5] * localY + m[9] * localZ + m[13];
+    const voxelWorldZ = m[2] * localX + m[6] * localY + m[10] * localZ + m[14];
     
     // project onto ray direction for hit distance
     const toVoxelX = voxelWorldX - controller.origin.x;
@@ -403,7 +410,7 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     const distanceAlongRay = toVoxelX * dirX + toVoxelY * dirY + toVoxelZ * dirZ;
     
     const voxelWorldSize = voxelScale * globalScale;
-    const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.1);
+    const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.5);
     
     return {
         instanceID,
