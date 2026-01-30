@@ -51,9 +51,11 @@ const mat4 = {
     }
 };
 
-// Large 192x192x192 file doesn't work on GitHub Pages (Git LFS not supported)
 // export const PATH = './resources/13-350um-192x192x192_lra_grid.json';
-export const PATH = './resources/atria_64x64x64.json';
+// export const PATH = './resources/atria_64x64x64.json';
+
+// CDN URL - Replace with your CDN URL once uploaded
+export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -796,6 +798,8 @@ window.addEventListener('load', async () => {
         
         if (picked) {
             console.log(`Picked voxel #${picked.instanceID} at (${picked.x}, ${picked.y}, ${picked.z})`);
+            // store for pacing
+            window.lastPickedVoxel = { x: picked.x, y: picked.y, z: picked.z };
         }
     });
     
@@ -850,28 +854,37 @@ window.addEventListener('load', async () => {
             console.log(simulationRunning ? 'Simulation running' : 'Simulation paused');
         }
         if (event.key === 'p' && !event.ctrlKey && !event.metaKey) {
-            // pace at center of structure
-            const structure = getStructure();
-            if (structure && simulationInitialized) {
-                // compute center of mass of actual voxels (not grid center - structure may be hollow)
-                const voxels = structure.voxels;
-                let sumX = 0, sumY = 0, sumZ = 0;
-                for (const v of voxels) {
-                    sumX += v.x;
-                    sumY += v.y;
-                    sumZ += v.z;
+            if (simulationInitialized) {
+                // pace at last picked voxel, or center if none picked
+                if (window.lastPickedVoxel) {
+                    const { x, y, z } = window.lastPickedVoxel;
+                    console.log(`Pacing at picked voxel (${x}, ${y}, ${z})`);
+                    paceAt(x, y, z, 10);
+                } else {
+                    // fallback: pace at center of mass
+                    const structure = getStructure();
+                    if (structure) {
+                        const voxels = structure.voxels;
+                        let sumX = 0, sumY = 0, sumZ = 0;
+                        for (const v of voxels) {
+                            sumX += v.x;
+                            sumY += v.y;
+                            sumZ += v.z;
+                        }
+                        const cx = Math.floor(sumX / voxels.length);
+                        const cy = Math.floor(sumY / voxels.length);
+                        const cz = Math.floor(sumZ / voxels.length);
+                        console.log(`No voxel picked, pacing at center (${cx}, ${cy}, ${cz})`);
+                        paceAt(cx, cy, cz, 10);
+                    }
                 }
-                const cx = Math.floor(sumX / voxels.length);
-                const cy = Math.floor(sumY / voxels.length);
-                const cz = Math.floor(sumZ / voxels.length);
-                paceAt(cx, cy, cz, 10);
             }
         }
     });
     
     window.clearPickedVoxels = clearPickedVoxels;
     
-    console.log('Controls: click=pick, c=clear, r=reset, SPACE=sim, p=pace');
+    console.log('Controls: click=pick, SPACE=start/stop, p=pace at picked voxel, c=clear, r=reset');
     
     // non-VR render loop for desktop testing
     function nonVRLoop() {
