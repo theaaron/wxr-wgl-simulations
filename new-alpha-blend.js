@@ -52,10 +52,10 @@ const mat4 = {
 };
 
 // export const PATH = './resources/13-350um-192x192x192_lra_grid.json';
-// export const PATH = './resources/atria_64x64x64.json';
+export const PATH = './resources/atria_64x64x64.json';
 
 // CDN URL - Replace with your CDN URL once uploaded
-export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
+// export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
