@@ -3,14 +3,20 @@ import { pickVoxel } from './renderStructure.js';
 
 // pacing callback - set by main app
 let paceCallback = null;
+let startSimulationCallback = null;
 
 export function setPaceCallback(callback) {
     paceCallback = callback;
 }
 
+export function setStartSimulationCallback(callback) {
+    startSimulationCallback = callback;
+}
+
 const RAY_LENGTH = 5.0;
 const RAY_COLOR = [0.5, 0.5, 0.5];
 const RAY_HIT_COLOR = [0.0, 1.0, 0.0];
+const RAY_BUTTON_HIT_COLOR = [1.0, 0.8, 0.0]; // gold when hovering button
 const RAY_RADIUS = 0.005;
 const RAY_SEGMENTS = 8;
 
@@ -23,6 +29,53 @@ let rayCylinderIndexCount = 0;
 
 let leftHitDistance = null;
 let rightHitDistance = null;
+
+// VR UI Button state
+let vrButtonProgram = null;
+let vrButtonBuffer = null;
+let vrButtonIndexBuffer = null;
+let leftHoveringButton = false;
+let rightHoveringButton = false;
+
+// Button position and size (in world space)
+const VR_BUTTON = {
+    position: [0.3, 0.0, -0.8],  // slightly to the right and in front
+    width: 0.25,
+    height: 0.12,
+    normal: [0, 0, 1]  // facing the user
+};
+
+// VR Button shaders
+const VR_BUTTON_VS = `#version 300 es
+in vec3 a_position;
+uniform mat4 u_projectionMatrix;
+uniform mat4 u_viewMatrix;
+uniform vec3 u_buttonPosition;
+uniform vec2 u_buttonSize;
+
+void main() {
+    vec3 worldPos = a_position;
+    worldPos.x *= u_buttonSize.x;
+    worldPos.y *= u_buttonSize.y;
+    worldPos += u_buttonPosition;
+    gl_Position = u_projectionMatrix * u_viewMatrix * vec4(worldPos, 1.0);
+}
+`;
+
+const VR_BUTTON_FS = `#version 300 es
+precision highp float;
+uniform vec3 u_buttonColor;
+uniform float u_hovering;
+out vec4 fragColor;
+
+void main() {
+    vec3 color = u_buttonColor;
+    if (u_hovering > 0.5) {
+        color = vec3(0.9, 0.75, 0.3); // highlight when hovering
+    }
+    fragColor = vec4(color, 1.0);
+}
+`;
 
 // structure manipulation state
 let structureTransform = {
@@ -76,13 +129,96 @@ export function initVRControllers(gl) {
     createRayCylinderGeometry(gl);
     rayProgram = createRayProgram(gl);
     
-    if (rayProgram) {
+    createVRButtonGeometry(gl);
+    vrButtonProgram = createVRButtonProgram(gl);
+    
+    if (rayProgram && vrButtonProgram) {
         console.log('✅ VR controller ray system initialized');
+        console.log('✅ VR UI button initialized');
         return true;
     } else {
         console.error('❌ Failed to initialize VR controller system');
         return false;
     }
+}
+
+function createVRButtonGeometry(gl) {
+    // Simple quad centered at origin, will be transformed by shader
+    const vertices = new Float32Array([
+        -0.5, -0.5, 0,
+         0.5, -0.5, 0,
+         0.5,  0.5, 0,
+        -0.5,  0.5, 0
+    ]);
+    
+    const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+    
+    vrButtonBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vrButtonBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    
+    vrButtonIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vrButtonIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+}
+
+function createVRButtonProgram(gl) {
+    const vs = compileShader(gl, VR_BUTTON_VS, gl.VERTEX_SHADER);
+    const fs = compileShader(gl, VR_BUTTON_FS, gl.FRAGMENT_SHADER);
+    
+    if (!vs || !fs) return null;
+    
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('VR Button program link error:', gl.getProgramInfoLog(program));
+        return null;
+    }
+    
+    return program;
+}
+
+// Check if a ray intersects the VR button plane
+function rayIntersectsButton(origin, direction) {
+    const btnPos = VR_BUTTON.position;
+    const btnNormal = VR_BUTTON.normal;
+    
+    // Plane equation: dot(normal, point - planePoint) = 0
+    // Ray: origin + t * direction
+    // Solve for t
+    
+    const denom = btnNormal[0] * direction.x + btnNormal[1] * direction.y + btnNormal[2] * direction.z;
+    
+    // Ray parallel to plane
+    if (Math.abs(denom) < 0.0001) return null;
+    
+    const t = ((btnPos[0] - origin.x) * btnNormal[0] + 
+               (btnPos[1] - origin.y) * btnNormal[1] + 
+               (btnPos[2] - origin.z) * btnNormal[2]) / denom;
+    
+    // Intersection behind ray origin
+    if (t < 0) return null;
+    
+    // Calculate intersection point
+    const hitX = origin.x + t * direction.x;
+    const hitY = origin.y + t * direction.y;
+    const hitZ = origin.z + t * direction.z;
+    
+    // Check if hit is within button bounds
+    const halfW = VR_BUTTON.width / 2;
+    const halfH = VR_BUTTON.height / 2;
+    
+    const localX = hitX - btnPos[0];
+    const localY = hitY - btnPos[1];
+    
+    if (Math.abs(localX) <= halfW && Math.abs(localY) <= halfH) {
+        return { distance: t, x: hitX, y: hitY, z: hitZ };
+    }
+    
+    return null;
 }
 
 function createRayCylinderGeometry(gl) {
@@ -178,6 +314,17 @@ function onSelect(event) {
         const hand = inputSource.handedness;
         const isGrabbing = (hand === 'left' && grabState.leftGrabbing) || 
                           (hand === 'right' && grabState.rightGrabbing);
+        
+        // Check if pointing at VR button
+        const isHoveringButton = (hand === 'left' && leftHoveringButton) ||
+                                  (hand === 'right' && rightHoveringButton);
+        
+        if (isHoveringButton && startSimulationCallback) {
+            // trigger while pointing at button = start simulation
+            console.log('🎮 VR Button pressed - starting simulation');
+            startSimulationCallback();
+            return;
+        }
         
         if (isGrabbing && paceCallback) {
             // grip + trigger = pace at ray intersection
@@ -382,21 +529,14 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     
     const voxel = structure.voxels[instanceID];
     
-    // calculate local position (before model matrix transformation)
+    // calculate world position (same as renderStructure)
     const centerVoxX = structure.dimensions.nx / 2;
     const centerVoxY = structure.dimensions.ny / 2;
     const centerVoxZ = structure.dimensions.nz / 2;
     
-    const localX = voxel.x - centerVoxX;
-    const localY = voxel.y - centerVoxY;
-    const localZ = voxel.z - centerVoxZ;
-    
-    // transform through full model matrix (actualModelMatrix = modelMatrix * baseMatrix)
-    // This accounts for VR grab transformations (rotation, translation, scale)
-    const m = actualModelMatrix;
-    const voxelWorldX = m[0] * localX + m[4] * localY + m[8] * localZ + m[12];
-    const voxelWorldY = m[1] * localX + m[5] * localY + m[9] * localZ + m[13];
-    const voxelWorldZ = m[2] * localX + m[6] * localY + m[10] * localZ + m[14];
+    const voxelWorldX = (voxel.x - centerVoxX) * globalScale;
+    const voxelWorldY = (voxel.y - centerVoxY) * globalScale;
+    const voxelWorldZ = (voxel.z - centerVoxZ) * globalScale - 1;
     
     // project onto ray direction for hit distance
     const toVoxelX = voxelWorldX - controller.origin.x;
@@ -410,7 +550,7 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
     const distanceAlongRay = toVoxelX * dirX + toVoxelY * dirY + toVoxelZ * dirZ;
     
     const voxelWorldSize = voxelScale * globalScale;
-    const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.5);
+    const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.1);
     
     return {
         instanceID,
@@ -520,6 +660,24 @@ export function updateControllers(frame, referenceSpace) {
 export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     if (!rayProgram || !rayCylinderBuffer) return;
     
+    // Check button hover state
+    leftHoveringButton = false;
+    rightHoveringButton = false;
+    
+    if (leftController) {
+        const btnHit = rayIntersectsButton(leftController.origin, leftController.direction);
+        if (btnHit) {
+            leftHoveringButton = true;
+        }
+    }
+    
+    if (rightController) {
+        const btnHit = rayIntersectsButton(rightController.origin, rightController.direction);
+        if (btnHit) {
+            rightHoveringButton = true;
+        }
+    }
+    
     gl.useProgram(rayProgram);
     
     const projLoc = gl.getUniformLocation(rayProgram, 'u_projectionMatrix');
@@ -542,8 +700,13 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     gl.depthFunc(gl.LESS);
     
     if (leftController) {
-        const hasHit = lastLeftPick !== null;
-        const leftColor = hasHit ? RAY_HIT_COLOR : RAY_COLOR;
+        const hasStructureHit = lastLeftPick !== null;
+        let leftColor = RAY_COLOR;
+        if (leftHoveringButton) {
+            leftColor = RAY_BUTTON_HIT_COLOR;
+        } else if (hasStructureHit) {
+            leftColor = RAY_HIT_COLOR;
+        }
         const leftLength = leftHitDistance !== null ? leftHitDistance : RAY_LENGTH;
         
         gl.uniform3fv(colorLoc, leftColor);
@@ -553,8 +716,13 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     }
     
     if (rightController) {
-        const hasHit = lastRightPick !== null;
-        const rightColor = hasHit ? RAY_HIT_COLOR : RAY_COLOR;
+        const hasStructureHit = lastRightPick !== null;
+        let rightColor = RAY_COLOR;
+        if (rightHoveringButton) {
+            rightColor = RAY_BUTTON_HIT_COLOR;
+        } else if (hasStructureHit) {
+            rightColor = RAY_HIT_COLOR;
+        }
         const rightLength = rightHitDistance !== null ? rightHitDistance : RAY_LENGTH;
         
         gl.uniform3fv(colorLoc, rightColor);
@@ -562,6 +730,44 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
         gl.uniformMatrix4fv(rayMatrixLoc, false, rightController.matrix);
         gl.drawElements(gl.TRIANGLES, rayCylinderIndexCount, gl.UNSIGNED_SHORT, 0);
     }
+}
+
+// Render the VR UI button panel
+export function renderVRButton(gl, projectionMatrix, viewMatrix) {
+    if (!vrButtonProgram || !vrButtonBuffer) return;
+    
+    gl.useProgram(vrButtonProgram);
+    
+    const projLoc = gl.getUniformLocation(vrButtonProgram, 'u_projectionMatrix');
+    const viewLoc = gl.getUniformLocation(vrButtonProgram, 'u_viewMatrix');
+    const positionLoc = gl.getUniformLocation(vrButtonProgram, 'u_buttonPosition');
+    const sizeLoc = gl.getUniformLocation(vrButtonProgram, 'u_buttonSize');
+    const colorLoc = gl.getUniformLocation(vrButtonProgram, 'u_buttonColor');
+    const hoveringLoc = gl.getUniformLocation(vrButtonProgram, 'u_hovering');
+    
+    gl.uniformMatrix4fv(projLoc, false, projectionMatrix);
+    gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
+    gl.uniform3fv(positionLoc, VR_BUTTON.position);
+    gl.uniform2f(sizeLoc, VR_BUTTON.width, VR_BUTTON.height);
+    
+    // Georgia Tech gold color
+    gl.uniform3f(colorLoc, 0.7, 0.64, 0.41);
+    
+    // Highlight if either controller is hovering
+    const isHovering = leftHoveringButton || rightHoveringButton;
+    gl.uniform1f(hoveringLoc, isHovering ? 1.0 : 0.0);
+    
+    const posLoc = gl.getAttribLocation(vrButtonProgram, 'a_position');
+    gl.bindBuffer(gl.ARRAY_BUFFER, vrButtonBuffer);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(posLoc);
+    
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vrButtonIndexBuffer);
+    
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 }
 
 export function getLeftController() {

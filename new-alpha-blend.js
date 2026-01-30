@@ -6,7 +6,7 @@ import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
-import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback } from "./rendering/vrControllers.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, renderVRButton, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, setStartSimulationCallback } from "./rendering/vrControllers.js";
 import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 
@@ -621,6 +621,34 @@ function onXRFrame(time, frame) {
                 paceAt(x, y, z, 8);
             });
             
+            // set up VR button callback to start simulation
+            setStartSimulationCallback(() => {
+                const struct = getStructure();
+                if (!struct) return;
+                
+                let paceX, paceY, paceZ;
+                
+                if (window.lastPickedVoxel) {
+                    paceX = window.lastPickedVoxel.x;
+                    paceY = window.lastPickedVoxel.y;
+                    paceZ = window.lastPickedVoxel.z;
+                    console.log(`VR Button: Starting at picked voxel (${paceX}, ${paceY}, ${paceZ})`);
+                } else {
+                    // pick a random voxel
+                    const voxels = struct.voxels;
+                    const randomIndex = Math.floor(Math.random() * voxels.length);
+                    const randomVoxel = voxels[randomIndex];
+                    paceX = randomVoxel.x;
+                    paceY = randomVoxel.y;
+                    paceZ = randomVoxel.z;
+                    console.log(`VR Button: Starting at random voxel #${randomIndex} (${paceX}, ${paceY}, ${paceZ})`);
+                }
+                
+                setRunning(true);
+                simulationRunning = true;
+                paceAt(paceX, paceY, paceZ, 10);
+            });
+            
             console.log('Cardiac simulation initialized in XR frame');
         } catch (e) {
             console.error('Failed to initialize simulation:', e);
@@ -661,6 +689,9 @@ function onXRFrame(time, frame) {
         const viewport = glLayer.getViewport(view);
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
+        
+        // render VR UI button
+        renderVRButton(gl, view.projectionMatrix, view.transform.inverse.matrix);
     }
 }
 
