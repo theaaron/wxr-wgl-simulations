@@ -805,7 +805,8 @@ window.addEventListener('load', async () => {
 
     // Load lab model
     try {
-        await loadLabModel(gl, './resources/Cath lab.obj', './resources/Cath lab.mtl');
+        const objPath = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/Cath%20lab.obj';
+        await loadLabModel(gl, objPath, './resources/Cath lab.mtl');
         updateStatus('Lab model loaded');
     } catch (error) {
         console.error('Failed to load lab model:', error);
