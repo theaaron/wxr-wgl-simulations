@@ -498,8 +498,6 @@ export const OBJ_FS = `#version 300 es
         }
         
         vec3 finalColor = Ia + Id + Is;
-        finalColor = finalColor * 0.65;
-        finalColor = min(finalColor, vec3(0.88));
         fragColor = vec4(finalColor, u_materialOpacity);
     }
 `;

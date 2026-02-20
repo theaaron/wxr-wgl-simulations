@@ -1,4 +1,4 @@
-import { loadOBJ } from './loadOBJ.js';
+import { loadGLB } from './loadGLB.js';
 import { OBJ_VS, OBJ_FS } from '../shaders.js';
 
 let labModel = null;
@@ -8,9 +8,6 @@ let labTextures = {};
 let labLoaded = false;
 let labLoading = null;
 
-function isPowerOf2(value) {
-  return (value & (value - 1)) === 0;
-}
 
 function createBuffers(gl, geometry) {
   const positionBuffer = gl.createBuffer();
@@ -32,32 +29,7 @@ function createBuffers(gl, geometry) {
   return { positionBuffer, normalBuffer, texCoordBuffer, indexBuffer, indexCount: geometry.indices.length };
 }
 
-function loadTexture(gl, url) {
-  return new Promise(resolve => {
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
 
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => {
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-      if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-        gl.generateMipmap(gl.TEXTURE_2D);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      } else {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      }
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      resolve(texture);
-    };
-    image.onerror = () => { console.warn(`Failed to load texture: ${url}`); resolve(null); };
-    image.src = url;
-  });
-}
 
 function compileShader(gl, source, type) {
   const shader = gl.createShader(type);
@@ -94,33 +66,33 @@ function computeNormalMatrix(modelMatrix, viewMatrix) {
   const mv = new Float32Array(16);
   for (let i = 0; i < 4; i++)
     for (let j = 0; j < 4; j++) {
-      mv[i*4+j] = 0;
-      for (let k = 0; k < 4; k++) mv[i*4+j] += viewMatrix[i*4+k] * modelMatrix[k*4+j];
+      mv[i * 4 + j] = 0;
+      for (let k = 0; k < 4; k++) mv[i * 4 + j] += viewMatrix[i * 4 + k] * modelMatrix[k * 4 + j];
     }
 
   const n = new Float32Array(9);
   for (let i = 0; i < 3; i++)
-    for (let j = 0; j < 3; j++) n[i*3+j] = mv[i*4+j];
+    for (let j = 0; j < 3; j++) n[i * 3 + j] = mv[i * 4 + j];
 
-  const det = n[0]*(n[4]*n[8] - n[5]*n[7]) - n[1]*(n[3]*n[8] - n[5]*n[6]) + n[2]*(n[3]*n[7] - n[4]*n[6]);
-  if (Math.abs(det) < 0.0001) return new Float32Array([1,0,0, 0,1,0, 0,0,1]);
+  const det = n[0] * (n[4] * n[8] - n[5] * n[7]) - n[1] * (n[3] * n[8] - n[5] * n[6]) + n[2] * (n[3] * n[7] - n[4] * n[6]);
+  if (Math.abs(det) < 0.0001) return new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
   const d = 1 / det;
   return new Float32Array([
-     (n[4]*n[8] - n[5]*n[7]) * d, -(n[1]*n[8] - n[2]*n[7]) * d,  (n[1]*n[5] - n[2]*n[4]) * d,
-    -(n[3]*n[8] - n[5]*n[6]) * d,  (n[0]*n[8] - n[2]*n[6]) * d, -(n[0]*n[5] - n[2]*n[3]) * d,
-     (n[3]*n[7] - n[4]*n[6]) * d, -(n[0]*n[7] - n[1]*n[6]) * d,  (n[0]*n[4] - n[1]*n[3]) * d
+    (n[4] * n[8] - n[5] * n[7]) * d, -(n[1] * n[8] - n[2] * n[7]) * d, (n[1] * n[5] - n[2] * n[4]) * d,
+    -(n[3] * n[8] - n[5] * n[6]) * d, (n[0] * n[8] - n[2] * n[6]) * d, -(n[0] * n[5] - n[2] * n[3]) * d,
+    (n[3] * n[7] - n[4] * n[6]) * d, -(n[0] * n[7] - n[1] * n[6]) * d, (n[0] * n[4] - n[1] * n[3]) * d
   ]);
 }
 
-export async function loadLabModel(gl, objPath, mtlPath) {
+export async function loadLabModel(gl, glbPath) {
   if (labLoading) return labLoading;
   if (labLoaded) return labModel;
 
   labLoading = (async () => {
     try {
       console.log('Loading lab model...');
-      const model = await loadOBJ(objPath, mtlPath);
+      const model = await loadGLB(glbPath, gl);
 
       labProgram = createProgram(gl, OBJ_VS, OBJ_FS);
       if (!labProgram) throw new Error('Failed to create lab shader program');
@@ -130,15 +102,15 @@ export async function loadLabModel(gl, objPath, mtlPath) {
 
       for (const [name, geometry] of Object.entries(model.geometry)) {
         labBuffers[name] = createBuffers(gl, geometry);
-        labTextures[name] = geometry.material.map_Kd
-          ? await loadTexture(gl, geometry.material.map_Kd)
-          : null;
+        labTextures[name] = geometry.glTexture ?? null;
       }
 
       labModel = model;
       labLoaded = true;
       labLoading = null;
-      console.log('Lab model loaded');
+      const texCount = Object.values(labTextures).filter(Boolean).length;
+      const total = Object.keys(labTextures).length;
+      console.log(`Lab model loaded — ${texCount}/${total} materials have textures`);
       return model;
     } catch (error) {
       console.error('Failed to load lab model:', error);
@@ -166,21 +138,21 @@ export function renderLab(gl, projMatrix, viewMatrix, modelMatrix) {
     nm[0], nm[1], nm[2], 0,
     nm[3], nm[4], nm[5], 0,
     nm[6], nm[7], nm[8], 0,
-    0,     0,     0,     1
+    0, 0, 0, 1
   ]);
   gl.uniformMatrix4fv(gl.getUniformLocation(labProgram, 'u_normalMatrix'), false, nm4);
 
   gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightDirection'), 0.6, 0.25, -0.66);
-  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightColor'), 0.9, 0.9, 0.9);
-  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightAmbient'), 0.08, 0.08, 0.08);
-  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightSpecular'), 0.2, 0.2, 0.2);
+  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightColor'), 1.0, 1.0, 1.0);
+  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightAmbient'), 0.5, 0.5, 0.5);
+  gl.uniform3f(gl.getUniformLocation(labProgram, 'u_lightSpecular'), 0.3, 0.3, 0.3);
 
   for (const [name, geometry] of Object.entries(labModel.geometry)) {
     const buffers = labBuffers[name];
     const mat = geometry.material;
 
     // ensure materials with Ka=0 still have visible ambient
-    const ambient = mat.Ka && (mat.Ka[0] + mat.Ka[1] + mat.Ka[2] > 0.01) ? mat.Ka : [0.15, 0.15, 0.15];
+    const ambient = mat.Ka && (mat.Ka[0] + mat.Ka[1] + mat.Ka[2] > 0.01) ? mat.Ka : [0.5, 0.5, 0.5];
     gl.uniform3fv(gl.getUniformLocation(labProgram, 'u_materialAmbient'), ambient);
     gl.uniform3fv(gl.getUniformLocation(labProgram, 'u_materialDiffuse'), mat.Kd);
     gl.uniform3fv(gl.getUniformLocation(labProgram, 'u_materialSpecular'), mat.Ks);
@@ -202,14 +174,17 @@ export function renderLab(gl, projMatrix, viewMatrix, modelMatrix) {
     const uvLoc = gl.getAttribLocation(labProgram, 'a_texCoord');
 
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.positionBuffer);
+    gl.vertexAttribDivisor(posLoc, 0);
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normalBuffer);
+    gl.vertexAttribDivisor(normLoc, 0);
     gl.enableVertexAttribArray(normLoc);
     gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.texCoordBuffer);
+    gl.vertexAttribDivisor(uvLoc, 0);
     gl.enableVertexAttribArray(uvLoc);
     gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
 

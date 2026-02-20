@@ -584,14 +584,12 @@ function drawSceneWithApproxBlending(view) {
     // Draw lab AFTER composite; user is inside the lab (origin at center), scale so room encloses you
     if (isLabLoaded()) {
         const labModelMatrix = mat4.create();
-        const labScale = 0.35;
-        labModelMatrix[0] = labScale;
-        labModelMatrix[5] = labScale;
-        labModelMatrix[10] = labScale;
-        labModelMatrix[15] = 1.0;
-        labModelMatrix[12] = 0;
-        labModelMatrix[13] = -1.2;
-        labModelMatrix[14] = -0.8;
+        const labScale = 3.0;
+        // Ry(270°) * Rx(90°): cos270=0, sin270=-1
+        labModelMatrix[0] = 0; labModelMatrix[1] = 0; labModelMatrix[2] = labScale; labModelMatrix[3] = 0;
+        labModelMatrix[4] = -labScale; labModelMatrix[5] = 0; labModelMatrix[6] = 0; labModelMatrix[7] = 0;
+        labModelMatrix[8] = 0; labModelMatrix[9] = -labScale; labModelMatrix[10] = 0; labModelMatrix[11] = 0;
+        labModelMatrix[12] = -18; labModelMatrix[13] = -4; labModelMatrix[14] = 16; labModelMatrix[15] = 1.0;
 
         gl.disable(gl.BLEND);
         gl.enable(gl.DEPTH_TEST);
@@ -805,8 +803,7 @@ window.addEventListener('load', async () => {
 
     // Load lab model
     try {
-        const objPath = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/Cath%20lab.obj';
-        await loadLabModel(gl, objPath, './resources/Cath lab.mtl');
+        await loadLabModel(gl, './resources/cath-lab.glb');
         updateStatus('Lab model loaded');
     } catch (error) {
         console.error('Failed to load lab model:', error);
@@ -915,7 +912,9 @@ window.addEventListener('load', async () => {
         }
     });
 
+
     window.addEventListener('keydown', (event) => {
+
         if (event.key === 'c' && !event.ctrlKey && !event.metaKey) {
             clearPickedVoxels();
         }
