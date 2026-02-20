@@ -152,4 +152,4 @@ export async function loadOBJ(objPath, mtlPath = null) {
   }
 
   return { geometry: buildGeometry(objData, materials), materials };
-git a}
+}
