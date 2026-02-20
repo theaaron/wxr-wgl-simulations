@@ -10,6 +10,7 @@ import { initVRControllers, setupControllerInput, updateControllers, renderContr
 import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel } from "./rendering/vrPanel.js";
 import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
+import { loadLabModel, renderLab, isLabLoaded } from "./rendering/renderLab.js";
 
 // simple mat4 utility for non-VR rendering
 const mat4 = {
@@ -580,6 +581,25 @@ function drawSceneWithApproxBlending(view) {
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
+    // Draw lab AFTER composite; user is inside the lab (origin at center), scale so room encloses you
+    if (isLabLoaded()) {
+        const labModelMatrix = mat4.create();
+        const labScale = 0.35;
+        labModelMatrix[0] = labScale;
+        labModelMatrix[5] = labScale;
+        labModelMatrix[10] = labScale;
+        labModelMatrix[15] = 1.0;
+        labModelMatrix[12] = 0;
+        labModelMatrix[13] = -1.2;
+        labModelMatrix[14] = -0.8;
+
+        gl.disable(gl.BLEND);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LESS);
+        gl.depthMask(true);
+        renderLab(gl, view.projectionMatrix, view.transform.inverse.matrix, labModelMatrix);
+    }
+
     gl.disable(gl.SCISSOR_TEST);
     gl.enable(gl.DEPTH_TEST);
 }
@@ -781,6 +801,15 @@ window.addEventListener('load', async () => {
     if (!initGL()) {
         updateStatus('WebGL initialization failed');
         return;
+    }
+
+    // Load lab model
+    try {
+        await loadLabModel(gl, './resources/Cath lab.obj', './resources/Cath lab.mtl');
+        updateStatus('Lab model loaded');
+    } catch (error) {
+        console.error('Failed to load lab model:', error);
+        updateStatus('Lab model failed to load, continuing without it');
     }
 
     if (!navigator.xr) {

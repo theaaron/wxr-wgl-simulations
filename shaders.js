@@ -415,3 +415,91 @@ export const PICKER_FS = `#version 300 es
         // fragColor = vec4(gray, gray, gray, 1.0);
     }
 `;
+
+// ============================================================================
+// OBJ MODEL SHADERS - For rendering lab environment
+// ============================================================================
+
+export const OBJ_VS = `#version 300 es
+    in vec3 a_position;
+    in vec3 a_normal;
+    in vec2 a_texCoord;
+    
+    uniform mat4 u_projectionMatrix;
+    uniform mat4 u_viewMatrix;
+    uniform mat4 u_modelMatrix;
+    uniform mat4 u_normalMatrix;
+    
+    out vec3 v_position;
+    out vec3 v_normal;
+    out vec2 v_texCoord;
+    
+    void main() {
+        vec4 worldPos = u_modelMatrix * vec4(a_position, 1.0);
+        vec4 viewPos = u_viewMatrix * worldPos;
+        gl_Position = u_projectionMatrix * viewPos;
+        
+        v_position = viewPos.xyz;
+        v_normal = normalize(mat3(u_normalMatrix) * a_normal);
+        v_texCoord = a_texCoord;
+    }
+`;
+
+export const OBJ_FS = `#version 300 es
+    precision highp float;
+    
+    uniform mat4 u_viewMatrix;
+    
+    // Material properties
+    uniform vec3 u_materialAmbient;
+    uniform vec3 u_materialDiffuse;
+    uniform vec3 u_materialSpecular;
+    uniform float u_materialShininess;
+    uniform float u_materialOpacity;
+    uniform sampler2D u_diffuseTexture;
+    uniform bool u_hasDiffuseTexture;
+    
+    // Light properties
+    uniform vec3 u_lightDirection;
+    uniform vec3 u_lightColor;
+    uniform vec3 u_lightAmbient;
+    uniform vec3 u_lightSpecular;
+    
+    in vec3 v_position;
+    in vec3 v_normal;
+    in vec2 v_texCoord;
+    
+    out vec4 fragColor;
+    
+    void main() {
+        vec3 N = normalize(v_normal);
+        vec3 E = normalize(-v_position);
+        
+        // Transform light direction to view space
+        vec3 L = normalize(mat3(u_viewMatrix) * u_lightDirection);
+        vec3 R = reflect(L, N);
+        float lambertTerm = dot(N, -L);
+        
+        // Get base color from texture or material
+        vec3 baseColor = u_hasDiffuseTexture 
+            ? texture(u_diffuseTexture, v_texCoord).rgb 
+            : u_materialDiffuse;
+        
+        // Ambient
+        vec3 Ia = u_lightAmbient * u_materialAmbient * baseColor;
+        
+        // Diffuse + Specular
+        vec3 Id = vec3(0.0);
+        vec3 Is = vec3(0.0);
+        if (lambertTerm > 0.0) {
+            Id = u_lightColor * baseColor * lambertTerm;
+            float specular = pow(max(dot(R, E), 0.0), u_materialShininess);
+            Is = u_lightSpecular * u_materialSpecular * specular;
+        }
+        
+        vec3 finalColor = Ia + Id + Is;
+        finalColor = finalColor * 0.65;
+        finalColor = min(finalColor, vec3(0.88));
+        fragColor = vec4(finalColor, u_materialOpacity);
+    }
+`;
