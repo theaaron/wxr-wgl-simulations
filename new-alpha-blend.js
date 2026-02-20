@@ -11,7 +11,7 @@ import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, trigge
 import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 import { loadLabModel, renderLab, isLabLoaded } from "./rendering/renderLab.js";
-import { updateHandTracking } from "./rendering/handTracking.js";
+// import { updateHandTracking } from "./rendering/handTracking.js";
 
 // simple mat4 utility for non-VR rendering
 const mat4 = {
@@ -612,7 +612,7 @@ function onXRFrame(time, frame) {
     xrSession.requestAnimationFrame(onXRFrame);
 
     updateControllers(frame, xrReferenceSpace);
-    updateHandTracking(frame, xrReferenceSpace);
+    // updateHandTracking(frame, xrReferenceSpace);
     updateStructureManipulation();
 
     // update panel hover state
