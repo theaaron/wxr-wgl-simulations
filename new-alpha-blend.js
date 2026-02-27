@@ -684,65 +684,66 @@ function onXRFrame(time, frame) {
         }
     }
 
+    // register VR panel callbacks once structure is available
+    if (structure && !onXRFrame.panelCallbacksRegistered) {
+        onXRFrame.panelCallbacksRegistered = true;
+
+        setPanelCallbacks({
+            startSimulation: () => {
+                const struct = getStructure();
+                if (!struct) return;
+
+                let paceX, paceY, paceZ;
+
+                if (window.lastPickedVoxel) {
+                    paceX = window.lastPickedVoxel.x;
+                    paceY = window.lastPickedVoxel.y;
+                    paceZ = window.lastPickedVoxel.z;
+                    console.log(`Panel: Starting at picked voxel (${paceX}, ${paceY}, ${paceZ})`);
+                } else {
+                    const voxels = struct.voxels;
+                    const randomIndex = Math.floor(Math.random() * voxels.length);
+                    const randomVoxel = voxels[randomIndex];
+                    paceX = randomVoxel.x;
+                    paceY = randomVoxel.y;
+                    paceZ = randomVoxel.z;
+                    console.log(`Panel: Starting at random voxel #${randomIndex} (${paceX}, ${paceY}, ${paceZ})`);
+                }
+
+                setRunning(true);
+                simulationRunning = true;
+                paceAt(paceX, paceY, paceZ, 10);
+            },
+            pauseSimulation: () => {
+                simulationRunning = !simulationRunning;
+                setRunning(simulationRunning);
+                console.log(`Panel: Simulation ${simulationRunning ? 'resumed' : 'paused'}`);
+            },
+            resetView: () => {
+                resetStructureTransform();
+                console.log('Panel: View reset');
+            }
+        });
+
+        setPaceCallback((x, y, z) => {
+            paceAt(x, y, z, 8);
+        });
+
+        console.log('VR panel callbacks registered');
+    }
+
     // initialize simulation once structure is loaded
     if (structure && !simulationInitialized) {
         try {
             initCardiacSimulation(gl, structure);
             voxelToTexelMap = buildVoxelToTexelMap(structure);
             simulationInitialized = true;
-
-            // set up VR pacing callback
-            setPaceCallback((x, y, z) => {
-                paceAt(x, y, z, 8);
-            });
-
-            // set up VR panel callbacks
-            setPanelCallbacks({
-                startSimulation: () => {
-                    const struct = getStructure();
-                    if (!struct) return;
-
-                    let paceX, paceY, paceZ;
-
-                    if (window.lastPickedVoxel) {
-                        paceX = window.lastPickedVoxel.x;
-                        paceY = window.lastPickedVoxel.y;
-                        paceZ = window.lastPickedVoxel.z;
-                        console.log(`Panel: Starting at picked voxel (${paceX}, ${paceY}, ${paceZ})`);
-                    } else {
-                        // pick a random voxel
-                        const voxels = struct.voxels;
-                        const randomIndex = Math.floor(Math.random() * voxels.length);
-                        const randomVoxel = voxels[randomIndex];
-                        paceX = randomVoxel.x;
-                        paceY = randomVoxel.y;
-                        paceZ = randomVoxel.z;
-                        console.log(`Panel: Starting at random voxel #${randomIndex} (${paceX}, ${paceY}, ${paceZ})`);
-                    }
-
-                    setRunning(true);
-                    simulationRunning = true;
-                    paceAt(paceX, paceY, paceZ, 10);
-                },
-                pauseSimulation: () => {
-                    simulationRunning = !simulationRunning;
-                    setRunning(simulationRunning);
-                    console.log(`Panel: Simulation ${simulationRunning ? 'resumed' : 'paused'}`);
-                },
-                resetView: () => {
-                    resetStructureTransform();
-                    console.log('Panel: View reset');
-                }
-            });
-
             console.log('Cardiac simulation initialized in XR frame');
         } catch (e) {
             console.error('Failed to initialize simulation:', e);
-            simulationInitialized = true; // prevent retry spam
+            simulationInitialized = true;
         }
     }
-
-    // run simulation steps and update colors (only if FBOs work)
     if (simulationInitialized && isSimulationWorking() && simulationRunning) {
         stepSimulation(getStepsPerFrame());
 

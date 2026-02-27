@@ -1,6 +1,6 @@
 // vr controller input and ray visualization
 import { pickVoxel } from './renderStructure.js';
-import { triggerPanelButton, isHoveringPanel } from './vrPanel.js';
+import { triggerPanelButton, isHoveringPanel, rayIntersectsPanel } from './vrPanel.js';
 
 // pacing callback - set by main app
 let paceCallback = null;
@@ -311,9 +311,7 @@ function onSelect(event) {
         const isGrabbing = (hand === 'left' && grabState.leftGrabbing) ||
             (hand === 'right' && grabState.rightGrabbing);
 
-        // Check if pointing at panel button
         if (isHoveringPanel()) {
-            // trigger while pointing at panel button = execute button action
             triggerPanelButton();
             return;
         }
@@ -660,21 +658,25 @@ export function updateControllers(frame, referenceSpace) {
 export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     if (!rayProgram || !rayCylinderBuffer) return;
 
-    // Check button hover state
     leftHoveringButton = false;
     rightHoveringButton = false;
 
+    let leftPanelDist = null;
+    let rightPanelDist = null;
+
     if (leftController) {
-        const btnHit = rayIntersectsButton(leftController.origin, leftController.direction);
-        if (btnHit) {
+        const panelHit = rayIntersectsPanel(leftController.origin, leftController.direction);
+        if (panelHit) {
             leftHoveringButton = true;
+            leftPanelDist = panelHit.distance;
         }
     }
 
     if (rightController) {
-        const btnHit = rayIntersectsButton(rightController.origin, rightController.direction);
-        if (btnHit) {
+        const panelHit = rayIntersectsPanel(rightController.origin, rightController.direction);
+        if (panelHit) {
             rightHoveringButton = true;
+            rightPanelDist = panelHit.distance;
         }
     }
 
@@ -707,7 +709,10 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
         } else if (hasStructureHit) {
             leftColor = RAY_HIT_COLOR;
         }
-        const leftLength = leftHitDistance !== null ? leftHitDistance : RAY_LENGTH;
+        let leftLength = leftHitDistance !== null ? leftHitDistance : RAY_LENGTH;
+        if (leftPanelDist !== null && leftPanelDist < leftLength) {
+            leftLength = leftPanelDist;
+        }
 
         gl.uniform3fv(colorLoc, leftColor);
         gl.uniform1f(rayLengthLoc, leftLength);
@@ -723,7 +728,10 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
         } else if (hasStructureHit) {
             rightColor = RAY_HIT_COLOR;
         }
-        const rightLength = rightHitDistance !== null ? rightHitDistance : RAY_LENGTH;
+        let rightLength = rightHitDistance !== null ? rightHitDistance : RAY_LENGTH;
+        if (rightPanelDist !== null && rightPanelDist < rightLength) {
+            rightLength = rightPanelDist;
+        }
 
         gl.uniform3fv(colorLoc, rightColor);
         gl.uniform1f(rayLengthLoc, rightLength);

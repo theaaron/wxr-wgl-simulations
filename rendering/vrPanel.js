@@ -337,7 +337,15 @@ export function rayIntersectsPanel(origin, direction) {
     if (Math.abs(hit.hitX) > 0.5 || Math.abs(hit.hitY) > 0.5) return null;
 
     const button = hitTestButton(hit.hitX, hit.hitY);
-    return { button, distance: hit.distance };
+
+    const modelMatrix = getPanelModelMatrix();
+    const worldHit = transformPoint(modelMatrix, [hit.hitX, hit.hitY, 0]);
+    const dx = worldHit[0] - origin.x;
+    const dy = worldHit[1] - origin.y;
+    const dz = worldHit[2] - origin.z;
+    const worldDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    return { button, distance: worldDistance };
 }
 
 export function fingerPokePanel(fingerTipPos) {
@@ -376,13 +384,14 @@ export function updatePanelHover(leftController, rightController) {
 
 export function triggerPanelButton(buttonId) {
     const id = buttonId || hoveredButton;
-    if (id && BUTTONS[id]) {
-        const action = BUTTONS[id].action;
-        if (action && callbacks[action]) {
-            console.log(`🎮 Panel button pressed: ${id}`);
-            callbacks[action]();
-            return true;
-        }
+    if (!id || !BUTTONS[id]) return false;
+
+    const action = BUTTONS[id].action;
+    console.log(`Panel button triggered: ${id}, action=${action}, registered=${!!callbacks[action]}`);
+
+    if (action && callbacks[action]) {
+        callbacks[action]();
+        return true;
     }
     return false;
 }
