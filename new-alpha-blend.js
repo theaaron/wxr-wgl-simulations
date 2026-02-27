@@ -1108,12 +1108,14 @@ window.addEventListener('load', async () => {
             renderStructure(
                 gl,
                 instancingExt,
-                simpleProgram,
                 cubeBuffer,
                 indexBuffer,
-                viewMatrix,
+                ALPHA,
+                PATH,
                 projMatrix,
-                modelMatrix
+                viewMatrix,
+                modelMatrix,
+                simpleProgram
             );
         }
     }
