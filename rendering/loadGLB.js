@@ -43,12 +43,17 @@ function decodeImage(gl, mimeType, imageData) {
     });
 }
 
-export async function loadGLB(glbPath, gl = null) {
-    const url = new URL(glbPath, window.location.href).href;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to load GLB: ${glbPath}`);
-
-    const arrayBuffer = await response.arrayBuffer();
+// Accepts either a URL string or a pre-fetched ArrayBuffer.
+export async function loadGLB(glbPathOrBuffer, gl = null) {
+    let arrayBuffer;
+    if (typeof glbPathOrBuffer === 'string') {
+        const url = new URL(glbPathOrBuffer, window.location.href).href;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to load GLB: ${glbPathOrBuffer}`);
+        arrayBuffer = await response.arrayBuffer();
+    } else {
+        arrayBuffer = glbPathOrBuffer;
+    }
     const view = new DataView(arrayBuffer);
 
     const magic = view.getUint32(0, true);

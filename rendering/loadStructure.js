@@ -1,9 +1,14 @@
-export async function loadStructure(path) {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`Failed to load atria data: ${response.status}`);
+export async function loadStructure(pathOrData) {
+  let data;
+  if (typeof pathOrData === 'string') {
+    const response = await fetch(pathOrData);
+    if (!response.ok) {
+      throw new Error(`Failed to load atria data: ${response.status}`);
+    }
+    data = await response.json();
+  } else {
+    data = pathOrData;
   }
-  const data = await response.json();
 
   const voxels = [];
   const indices = data.fullTexelIndex;
