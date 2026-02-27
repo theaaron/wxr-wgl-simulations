@@ -6,12 +6,12 @@ import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
-import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, processControllerPick, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, getLeftController, getRightController } from "./rendering/vrControllers.js";
-import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel, fingerPokePanel } from "./rendering/vrPanel.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, processControllerPick, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, getLeftController, getRightController, isControllerSqueezing } from "./rendering/vrControllers.js";
+import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel, fingerPokePanel, updatePanelGrab, isPanelGrabbed } from "./rendering/vrPanel.js";
 import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 import { loadLabModel, renderLab, isLabLoaded } from "./rendering/renderLab.js";
-import { updateHandTracking, getFingerRay, processFingerPickResult, processFingerPanelPoke, consumeFingerTap, consumeFingerPanelPoke } from "./rendering/handTracking.js";
+import { updateHandTracking, getFingerRay, processFingerPickResult, processFingerPanelPoke, consumeFingerTap, consumeFingerPanelPoke, isHandPinching } from "./rendering/handTracking.js";
 import { loadStructure } from "./rendering/loadStructure.js";
 import { initLoadingProgress, fetchWithProgress, onAllLoaded } from "./loadingProgress.js";
 
@@ -615,10 +615,24 @@ function onXRFrame(time, frame) {
 
     updateControllers(frame, xrReferenceSpace);
     updateHandTracking(frame, xrReferenceSpace);
-    updateStructureManipulation();
+
+    const leftCtrl = getLeftController();
+    const rightCtrl = getRightController();
 
     // update panel hover state (controller rays)
-    updatePanelHover(getLeftController(), getRightController());
+    updatePanelHover(leftCtrl, rightCtrl);
+
+    // panel grab: controller squeeze or hand pinch on the grab bar
+    updatePanelGrab(
+        leftCtrl, rightCtrl,
+        isControllerSqueezing('left'), isControllerSqueezing('right'),
+        isHandPinching('left'), isHandPinching('right')
+    );
+
+    // only move the structure when the panel isn't being dragged
+    if (!isPanelGrabbed()) {
+        updateStructureManipulation();
+    }
 
     // process any pending controller picks
     const structure = getStructure();

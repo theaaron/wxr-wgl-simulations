@@ -1,52 +1,61 @@
-// VR Control Panel - floating UI for simulation controls
-// Position: left side, waist height, angled toward user
-
-// ============================================================================
-// PANEL CONFIGURATION
-// ============================================================================
+// vr control panel — 3x3 grid + grab bar
 
 const PANEL = {
     position: [-0.5, 0.0, -0.6],
-    width: 0.35,
-    height: 0.25,
+    width: 0.36,
+    height: 0.30,
     rotation: 25 * Math.PI / 180,
-    backgroundColor: [0.1, 0.1, 0.15, 0.85],
-    borderColor: [0.4, 0.4, 0.5, 1.0],
-    borderWidth: 0.008
+    backgroundColor: [0.12, 0.12, 0.16, 0.9],
 };
 
-const BUTTONS = {
-    startSimulation: {
-        label: '▶ Start',
-        x: 0,
-        y: 0.06,
-        width: 0.12,
-        height: 0.05,
-        color: [0.2, 0.6, 0.3],
-        hoverColor: [0.3, 0.8, 0.4],
-        action: 'startSimulation'
-    },
-    pauseSimulation: {
-        label: '⏸ Pause',
-        x: 0,
-        y: 0,
-        width: 0.12,
-        height: 0.05,
-        color: [0.6, 0.5, 0.2],
-        hoverColor: [0.8, 0.7, 0.3],
-        action: 'pauseSimulation'
-    },
-    resetView: {
-        label: '↺ Reset',
-        x: 0,
-        y: -0.06,
-        width: 0.12,
-        height: 0.05,
-        color: [0.4, 0.4, 0.5],
-        hoverColor: [0.5, 0.5, 0.65],
-        action: 'resetView'
-    }
+const LAYOUT = {
+    padding: 0.04,
+    gap: 0.02,
+    barReserve: 0.10,
 };
+
+const BAR = {
+    y: -0.46,
+    width: 0.30,
+    height: 0.035,
+    color: [0.45, 0.45, 0.50],
+    hoverColor: [0.65, 0.65, 0.70],
+};
+
+function generateButtons() {
+    const p = LAYOUT.padding;
+    const g = LAYOUT.gap;
+
+    const left = -0.5 + p;
+    const right = 0.5 - p;
+    const top = 0.5 - p;
+    const bottom = -0.5 + LAYOUT.barReserve + p;
+
+    const cols = 3, rows = 3;
+    const btnW = (right - left - (cols - 1) * g) / cols;
+    const btnH = (top - bottom - (rows - 1) * g) / rows;
+
+    const buttons = {};
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const x = left + c * (btnW + g) + btnW / 2;
+            const y = top - r * (btnH + g) - btnH / 2;
+            const isStart = r === 0 && c === 0;
+
+            buttons[`btn_${r}_${c}`] = {
+                x, y, width: btnW, height: btnH,
+                color: isStart ? [0.2, 0.4, 0.8] : [0.85, 0.85, 0.85],
+                hoverColor: isStart ? [0.35, 0.55, 0.95] : [1.0, 1.0, 1.0],
+                action: isStart ? 'startSimulation' : null,
+            };
+        }
+    }
+
+    return buttons;
+}
+
+const BUTTONS = generateButtons();
 
 // ============================================================================
 // STATE
@@ -55,16 +64,25 @@ const BUTTONS = {
 let gl = null;
 let panelProgram = null;
 let buttonProgram = null;
+let barProgram = null;
 let panelBuffer = null;
 let panelIndexBuffer = null;
 let buttonBuffer = null;
 let buttonIndexBuffer = null;
 
 let hoveredButton = null;
+let barHovered = false;
+
+let panelGrab = {
+    active: false,
+    hand: null,
+    offset: [0, 0, 0],
+};
+
 let callbacks = {
     startSimulation: null,
     pauseSimulation: null,
-    resetView: null
+    resetView: null,
 };
 
 // ============================================================================
@@ -118,9 +136,47 @@ out vec4 fragColor;
 void main() {
     vec3 color = u_buttonColor;
     if (u_hover > 0.5) {
-        color = color * 1.3; // brighten on hover
+        color = color * 1.3;
     }
     fragColor = vec4(color, 1.0);
+}
+`;
+
+// grab bar uses uvs for capsule/pill sdf
+const BAR_VS = `#version 300 es
+in vec3 a_position;
+uniform mat4 u_projectionMatrix;
+uniform mat4 u_viewMatrix;
+uniform mat4 u_modelMatrix;
+uniform vec3 u_barOffset;
+uniform vec2 u_barSize;
+out vec2 v_uv;
+
+void main() {
+    v_uv = a_position.xy + 0.5;
+    vec3 pos = a_position;
+    pos.x = pos.x * u_barSize.x + u_barOffset.x;
+    pos.y = pos.y * u_barSize.y + u_barOffset.y;
+    pos.z += 0.002;
+    gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(pos, 1.0);
+}
+`;
+
+const BAR_FS = `#version 300 es
+precision highp float;
+uniform vec3 u_barColor;
+uniform vec2 u_barSize;
+in vec2 v_uv;
+out vec4 fragColor;
+
+void main() {
+    vec2 p = (v_uv - 0.5) * u_barSize;
+    float r = u_barSize.y * 0.5;
+    float halfLen = max(u_barSize.x * 0.5 - r, 0.0);
+    float d = length(vec2(max(abs(p.x) - halfLen, 0.0), p.y)) - r;
+    if (d > 0.0) discard;
+    float alpha = smoothstep(0.0, -0.001, d);
+    fragColor = vec4(u_barColor, alpha * 0.9);
 }
 `;
 
@@ -131,13 +187,13 @@ void main() {
 export function initVRPanel(glContext) {
     gl = glContext;
 
-    createPanelGeometry();
-    createButtonGeometry();
+    createQuadGeometry();
     panelProgram = createProgram(PANEL_VS, PANEL_FS, 'Panel');
     buttonProgram = createProgram(BUTTON_VS, BUTTON_FS, 'Button');
+    barProgram = createProgram(BAR_VS, BAR_FS, 'Bar');
 
-    if (panelProgram && buttonProgram) {
-        console.log('✅ VR Panel initialized');
+    if (panelProgram && buttonProgram && barProgram) {
+        console.log('✅ VR Panel initialized (3×3 grid + grab bar)');
         return true;
     }
 
@@ -145,15 +201,13 @@ export function initVRPanel(glContext) {
     return false;
 }
 
-function createPanelGeometry() {
-    // Simple quad for panel background
+function createQuadGeometry() {
     const vertices = new Float32Array([
         -0.5, -0.5, 0,
-        0.5, -0.5, 0,
-        0.5, 0.5, 0,
-        -0.5, 0.5, 0
+         0.5, -0.5, 0,
+         0.5,  0.5, 0,
+        -0.5,  0.5, 0
     ]);
-
     const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
     panelBuffer = gl.createBuffer();
@@ -163,32 +217,15 @@ function createPanelGeometry() {
     panelIndexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, panelIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-}
 
-function createButtonGeometry() {
-    // reusable quad for buttons (scaled/positioned via uniforms)
-    const vertices = new Float32Array([
-        -0.5, -0.5, 0,
-        0.5, -0.5, 0,
-        0.5, 0.5, 0,
-        -0.5, 0.5, 0
-    ]);
-
-    const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
-
-    buttonBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buttonBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-    buttonIndexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buttonIndexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    // reuse for buttons and bar
+    buttonBuffer = panelBuffer;
+    buttonIndexBuffer = panelIndexBuffer;
 }
 
 function createProgram(vsSource, fsSource, name) {
     const vs = compileShader(vsSource, gl.VERTEX_SHADER, name);
     const fs = compileShader(fsSource, gl.FRAGMENT_SHADER, name);
-
     if (!vs || !fs) return null;
 
     const program = gl.createProgram();
@@ -200,7 +237,6 @@ function createProgram(vsSource, fsSource, name) {
         console.error(`${name} program link error:`, gl.getProgramInfoLog(program));
         return null;
     }
-
     return program;
 }
 
@@ -208,17 +244,15 @@ function compileShader(source, type, name) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
-
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
         console.error(`${name} shader compile error:`, gl.getShaderInfoLog(shader));
         return null;
     }
-
     return shader;
 }
 
 // ============================================================================
-// CALLBACK REGISTRATION
+// CALLBACKS
 // ============================================================================
 
 export function setPanelCallbacks(cbs) {
@@ -236,7 +270,6 @@ function getPanelModelMatrix() {
     const rot = PANEL.rotation;
     const w = PANEL.width;
     const h = PANEL.height;
-
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
 
@@ -249,12 +282,13 @@ function getPanelModelMatrix() {
 }
 
 // ============================================================================
-// RAY INTERSECTION
+// HIT TESTING 
 // ============================================================================
 
-export function rayIntersectsPanel(origin, direction) {
+function rayToLocal(origin, direction) {
     const modelMatrix = getPanelModelMatrix();
     const invModel = invertMatrix(modelMatrix);
+    if (!invModel) return null;
 
     const localOrigin = transformPoint(invModel, [origin.x, origin.y, origin.z]);
     const localDir = transformDirection(invModel, [direction.x, direction.y, direction.z]);
@@ -267,51 +301,84 @@ export function rayIntersectsPanel(origin, direction) {
     const hitX = localOrigin[0] + t * localDir[0];
     const hitY = localOrigin[1] + t * localDir[1];
 
-    if (Math.abs(hitX) > 0.5 || Math.abs(hitY) > 0.5) return null;
+    return { hitX, hitY, distance: t };
+}
 
+function pointToLocal(worldPos) {
+    const modelMatrix = getPanelModelMatrix();
+    const invModel = invertMatrix(modelMatrix);
+    if (!invModel) return null;
+    return transformPoint(invModel, [worldPos.x, worldPos.y, worldPos.z]);
+}
+
+function hitTestButton(hitX, hitY) {
     for (const [id, btn] of Object.entries(BUTTONS)) {
-        const btnLeft = btn.x - btn.width / 2;
-        const btnRight = btn.x + btn.width / 2;
-        const btnBottom = btn.y - btn.height / 2;
-        const btnTop = btn.y + btn.height / 2;
-
-        const scaledX = hitX * PANEL.width;
-        const scaledY = hitY * PANEL.height;
-
-        if (scaledX >= btnLeft && scaledX <= btnRight &&
-            scaledY >= btnBottom && scaledY <= btnTop) {
-            return { button: id, distance: t };
+        if (hitX >= btn.x - btn.width / 2 && hitX <= btn.x + btn.width / 2 &&
+            hitY >= btn.y - btn.height / 2 && hitY <= btn.y + btn.height / 2) {
+            return id;
         }
     }
-
-    return { button: null, distance: t };
+    return null;
 }
+
+function hitTestBar(hitX, hitY) {
+    return Math.abs(hitX) <= BAR.width / 2 &&
+           Math.abs(hitY - BAR.y) <= BAR.height / 2;
+}
+
+// ============================================================================
+// ray / poke intersection
+// ============================================================================
+
+export function rayIntersectsPanel(origin, direction) {
+    const hit = rayToLocal(origin, direction);
+    if (!hit) return null;
+
+    if (Math.abs(hit.hitX) > 0.5 || Math.abs(hit.hitY) > 0.5) return null;
+
+    const button = hitTestButton(hit.hitX, hit.hitY);
+    return { button, distance: hit.distance };
+}
+
+export function fingerPokePanel(fingerTipPos) {
+    const local = pointToLocal(fingerTipPos);
+    if (!local) return null;
+
+    if (Math.abs(local[2]) > 0.06) return null;
+    if (Math.abs(local[0]) > 0.5 || Math.abs(local[1]) > 0.5) return null;
+
+    return hitTestButton(local[0], local[1]);
+}
+
+// ============================================================================
+// PANEL HOVER (buttons + bar)
+// ============================================================================
 
 export function updatePanelHover(leftController, rightController) {
     hoveredButton = null;
+    barHovered = false;
 
-    if (leftController) {
-        const hit = rayIntersectsPanel(leftController.origin, leftController.direction);
-        if (hit && hit.button) {
-            hoveredButton = hit.button;
-            return;
-        }
-    }
+    const controllers = [leftController, rightController].filter(Boolean);
+    for (const ctrl of controllers) {
+        const hit = rayToLocal(ctrl.origin, ctrl.direction);
+        if (!hit || Math.abs(hit.hitX) > 0.55 || Math.abs(hit.hitY) > 0.6) continue;
 
-    if (rightController) {
-        const hit = rayIntersectsPanel(rightController.origin, rightController.direction);
-        if (hit && hit.button) {
-            hoveredButton = hit.button;
-            return;
-        }
+        const btn = hitTestButton(hit.hitX, hit.hitY);
+        if (btn) { hoveredButton = btn; return; }
+
+        if (hitTestBar(hit.hitX, hit.hitY)) { barHovered = true; return; }
     }
 }
+
+// ============================================================================
+// BUTTON TRIGGER
+// ============================================================================
 
 export function triggerPanelButton(buttonId) {
     const id = buttonId || hoveredButton;
     if (id && BUTTONS[id]) {
         const action = BUTTONS[id].action;
-        if (callbacks[action]) {
+        if (action && callbacks[action]) {
             console.log(`🎮 Panel button pressed: ${id}`);
             callbacks[action]();
             return true;
@@ -328,30 +395,81 @@ export function getHoveredButton() {
     return hoveredButton;
 }
 
+export function isBarHovered() {
+    return barHovered;
+}
 
-export function fingerPokePanel(fingerTipPos) {
-    const modelMatrix = getPanelModelMatrix();
-    const invModel = invertMatrix(modelMatrix);
-    if (!invModel) return null;
+// ============================================================================
+// PANEL GRAB (controller squeeze or hand pinch on the bar)
+// ============================================================================
 
-    const localPos = transformPoint(invModel, [fingerTipPos.x, fingerTipPos.y, fingerTipPos.z]);
+// call each frame from the main loop. checks if a grab should start, continue, or end based on controller/hand state near the grab bar.
+export function updatePanelGrab(leftCtrl, rightCtrl, leftSqueezing, rightSqueezing, leftPinching, rightPinching) {
+    if (panelGrab.active) {
+        const hand = panelGrab.hand;
+        const ctrl = hand === 'left' ? leftCtrl : rightCtrl;
+        const stillHolding = hand === 'left'
+            ? (leftSqueezing || leftPinching)
+            : (rightSqueezing || rightPinching);
 
-    if (Math.abs(localPos[2]) > 0.06) return null;
-
-    // might need to be adjusted in the future for distance to panel plane
-    if (Math.abs(localPos[0]) > 0.5 || Math.abs(localPos[1]) > 0.5) return null;
-
-    for (const [id, btn] of Object.entries(BUTTONS)) {
-        const scaledX = localPos[0] * PANEL.width;
-        const scaledY = localPos[1] * PANEL.height;
-
-        if (scaledX >= btn.x - btn.width / 2 && scaledX <= btn.x + btn.width / 2 &&
-            scaledY >= btn.y - btn.height / 2 && scaledY <= btn.y + btn.height / 2) {
-            return id;
+        if (!stillHolding || !ctrl) {
+            panelGrab.active = false;
+            panelGrab.hand = null;
+            return;
         }
+
+        PANEL.position = [
+            ctrl.origin.x + panelGrab.offset[0],
+            ctrl.origin.y + panelGrab.offset[1],
+            ctrl.origin.z + panelGrab.offset[2],
+        ];
+        return;
     }
 
-    return null;
+    // try to start a grab — check both controller ray hitting bar and hand proximity
+    const candidates = [
+        { hand: 'left', ctrl: leftCtrl, squeezing: leftSqueezing, pinching: leftPinching },
+        { hand: 'right', ctrl: rightCtrl, squeezing: rightSqueezing, pinching: rightPinching },
+    ];
+
+    for (const c of candidates) {
+        if (!c.ctrl) continue;
+        const grabbing = c.squeezing || c.pinching;
+        if (!grabbing) continue;
+
+        let nearBar = false;
+
+        // controller ray → bar hit test
+        if (c.squeezing) {
+            const hit = rayToLocal(c.ctrl.origin, c.ctrl.direction);
+            if (hit && hitTestBar(hit.hitX, hit.hitY)) nearBar = true;
+        }
+
+        // hand pinch → proximity to bar in world space
+        if (c.pinching && !nearBar) {
+            const local = pointToLocal(c.ctrl.origin);
+            if (local && Math.abs(local[0]) <= BAR.width / 2 + 0.1 &&
+                Math.abs(local[1] - BAR.y) <= 0.15 &&
+                Math.abs(local[2]) <= 0.15) {
+                nearBar = true;
+            }
+        }
+
+        if (nearBar) {
+            panelGrab.active = true;
+            panelGrab.hand = c.hand;
+            panelGrab.offset = [
+                PANEL.position[0] - c.ctrl.origin.x,
+                PANEL.position[1] - c.ctrl.origin.y,
+                PANEL.position[2] - c.ctrl.origin.z,
+            ];
+            return;
+        }
+    }
+}
+
+export function isPanelGrabbed() {
+    return panelGrab.active;
 }
 
 // ============================================================================
@@ -359,59 +477,67 @@ export function fingerPokePanel(fingerTipPos) {
 // ============================================================================
 
 export function renderVRPanel(projectionMatrix, viewMatrix) {
-    if (!panelProgram || !buttonProgram) return;
+    if (!panelProgram || !buttonProgram || !barProgram) return;
 
     const modelMatrix = getPanelModelMatrix();
-
-    // render panel background
-    gl.useProgram(panelProgram);
-
-    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_projectionMatrix'), false, projectionMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_viewMatrix'), false, viewMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_modelMatrix'), false, modelMatrix);
-    gl.uniform4fv(gl.getUniformLocation(panelProgram, 'u_color'), PANEL.backgroundColor);
-
-    const posLoc = gl.getAttribLocation(panelProgram, 'a_position');
-    gl.bindBuffer(gl.ARRAY_BUFFER, panelBuffer);
-    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(posLoc);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, panelIndexBuffer);
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
 
+    gl.useProgram(panelProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_projectionMatrix'), false, projectionMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_viewMatrix'), false, viewMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(panelProgram, 'u_modelMatrix'), false, modelMatrix);
+    gl.uniform4fv(gl.getUniformLocation(panelProgram, 'u_color'), PANEL.backgroundColor);
+
+    bindQuad(panelProgram);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
-    // render buttons
+    //buttons (3x3 grid)
     gl.useProgram(buttonProgram);
-
     gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_projectionMatrix'), false, projectionMatrix);
     gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_viewMatrix'), false, viewMatrix);
     gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_modelMatrix'), false, modelMatrix);
 
-    const btnPosLoc = gl.getAttribLocation(buttonProgram, 'a_position');
-    gl.bindBuffer(gl.ARRAY_BUFFER, buttonBuffer);
-    gl.vertexAttribPointer(btnPosLoc, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(btnPosLoc);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buttonIndexBuffer);
+    bindQuad(buttonProgram);
 
     for (const [id, btn] of Object.entries(BUTTONS)) {
-        const isHovered = hoveredButton === id;
-        const color = isHovered ? btn.hoverColor : btn.color;
+        const isHov = hoveredButton === id;
+        const color = isHov ? btn.hoverColor : btn.color;
 
         gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [btn.x, btn.y, 0]);
         gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [btn.width, btn.height]);
         gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), color);
-        gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), isHovered ? 1.0 : 0.0);
+        gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), isHov ? 1.0 : 0.0);
 
         gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
     }
 
+    // grab bar (capsule / pill)
+    gl.useProgram(barProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(barProgram, 'u_projectionMatrix'), false, projectionMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(barProgram, 'u_viewMatrix'), false, viewMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(barProgram, 'u_modelMatrix'), false, modelMatrix);
+
+    const barColor = barHovered || panelGrab.active ? BAR.hoverColor : BAR.color;
+    gl.uniform3fv(gl.getUniformLocation(barProgram, 'u_barColor'), barColor);
+    gl.uniform3fv(gl.getUniformLocation(barProgram, 'u_barOffset'), [0, BAR.y, 0]);
+    gl.uniform2fv(gl.getUniformLocation(barProgram, 'u_barSize'), [BAR.width, BAR.height]);
+
+    bindQuad(barProgram);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
     gl.disable(gl.BLEND);
+}
+
+function bindQuad(program) {
+    const posLoc = gl.getAttribLocation(program, 'a_position');
+    gl.bindBuffer(gl.ARRAY_BUFFER, panelBuffer);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(posLoc);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, panelIndexBuffer);
 }
 
 // ============================================================================
@@ -420,24 +546,17 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
 
 function invertMatrix(m) {
     const out = new Float32Array(16);
-
     const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
     const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
     const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
     const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
 
-    const b00 = a00 * a11 - a01 * a10;
-    const b01 = a00 * a12 - a02 * a10;
-    const b02 = a00 * a13 - a03 * a10;
-    const b03 = a01 * a12 - a02 * a11;
-    const b04 = a01 * a13 - a03 * a11;
-    const b05 = a02 * a13 - a03 * a12;
-    const b06 = a20 * a31 - a21 * a30;
-    const b07 = a20 * a32 - a22 * a30;
-    const b08 = a20 * a33 - a23 * a30;
-    const b09 = a21 * a32 - a22 * a31;
-    const b10 = a21 * a33 - a23 * a31;
-    const b11 = a22 * a33 - a23 * a32;
+    const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10;
+    const b02 = a00 * a13 - a03 * a10, b03 = a01 * a12 - a02 * a11;
+    const b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30;
+    const b08 = a20 * a33 - a23 * a30, b09 = a21 * a32 - a22 * a31;
+    const b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
 
     let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
     if (!det) return null;

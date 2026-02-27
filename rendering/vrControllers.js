@@ -1075,3 +1075,7 @@ export function getLastLeftPick() {
 export function getLastRightPick() {
     return lastRightPick;
 }
+
+export function isControllerSqueezing(hand) {
+    return hand === 'left' ? grabState.leftGrabbing : grabState.rightGrabbing;
+}
