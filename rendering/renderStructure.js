@@ -93,6 +93,17 @@ export function getStructure() {
     return renderStructure.cachedStructure;
 }
 
+// lazy fetch during startup
+export function setStructureData(gl, struct) {
+    renderStructure.cachedStructure = struct;
+    renderStructure.loading = null;
+    renderStructure.instanceDataTexture = createInstanceDataTexture(gl, struct);
+    renderStructure.instanceIDBuffer = createInstanceIDBuffer(gl, struct.voxels.length);
+    createPositionBuffer(gl, struct);
+    createNormalBuffer(gl, struct);
+    console.log(`✅ Structure pre-loaded: ${struct.voxels.length} voxels, GPU buffers ready`);
+}
+
 function createInstanceDataTexture(gl, structure) {
     const numVoxels = structure.voxels.length;
     
@@ -127,7 +138,6 @@ function createInstanceDataTexture(gl, structure) {
 }
 
 function createInstanceIDBuffer(gl, numInstances) {
-    // create buffer with instance IDs (0, 1, 2, ..., numInstances-1)
     const data = new Float32Array(numInstances);
     for (let i = 0; i < numInstances; i++) {
         data[i] = i;
@@ -158,12 +168,10 @@ function createPositionBuffer(gl, structure) {
         positions[i * 3 + 2] = voxel.z - centerZ;
     }
     
-    // Create and populate buffer
     renderStructure.positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
     
-    // Also create color buffer (will be populated on first render)
     renderStructure.colorBuffer = gl.createBuffer();
     
     console.log(`Created position buffer: ${structure.voxels.length} voxels, centered at (${centerX}, ${centerY}, ${centerZ})`);
@@ -186,7 +194,7 @@ function computeSurfaceNormals(structure) {
         return getU(vx + dx, vy + dy, vz + dz) - getU(vx - dx, vy - dy, vz - dz);
     };
     
-    // Abubu weighting factor
+    // abubu.js weighting factor
     const omega = 0.586;
     const primaryWeight = 2 * omega + 1;
     const secondaryWeight = (1 - omega) / Math.sqrt(2);
@@ -527,7 +535,7 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
     gl.viewport(0, 0, canvas.width, canvas.height);
     
     // debug: clear to bright magenta to verify fbo is being used
-    gl.clearColor(1, 0, 1, 1);  // Magenta = (255, 0, 255)
+    gl.clearColor(1, 0, 1, 1); 
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
     
@@ -556,7 +564,7 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
     gl.uniformMatrix4fv(projLoc, false, projMatrix);
     gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
     
-    // use dynamic globalScale from window (set by render function)
+    // use dynamic globalScale from window
     const maxDim = Math.max(structure.dimensions.nx, structure.dimensions.ny, structure.dimensions.nz);
     const globalScale = 0.02 * (192 / maxDim);
     const zScale = renderStructure.zScale || 1.0;
@@ -574,7 +582,6 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
         gl.uniform1f(cubeScaleLoc, voxelSize);
     }
     
-    // set up vert attributes
     const posLoc = gl.getAttribLocation(pickingProgram, 'a_position');
     const instPosLoc = gl.getAttribLocation(pickingProgram, 'a_instancePosition');
     const instIDLoc = gl.getAttribLocation(pickingProgram, 'a_instanceID');
@@ -699,9 +706,7 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
         return null;
     }
     
-    // Decode instance ID from RGB
-    // Shader encodes as: R = high byte, G = mid byte, B = low byte
-    // So: ID = R*65536 + G*256 + B
+    // decode instance ID from RGB
     const instanceID = pixel[0] * 65536 + pixel[1] * 256 + pixel[2];
     
     console.log(`   Decoded instance ID: ${instanceID} (max: ${structure.voxels.length - 1})`);

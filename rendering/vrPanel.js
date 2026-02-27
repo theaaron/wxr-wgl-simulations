@@ -307,11 +307,12 @@ export function updatePanelHover(leftController, rightController) {
     }
 }
 
-export function triggerPanelButton() {
-    if (hoveredButton && BUTTONS[hoveredButton]) {
-        const action = BUTTONS[hoveredButton].action;
+export function triggerPanelButton(buttonId) {
+    const id = buttonId || hoveredButton;
+    if (id && BUTTONS[id]) {
+        const action = BUTTONS[id].action;
         if (callbacks[action]) {
-            console.log(`🎮 Panel button pressed: ${hoveredButton}`);
+            console.log(`🎮 Panel button pressed: ${id}`);
             callbacks[action]();
             return true;
         }
@@ -325,6 +326,32 @@ export function isHoveringPanel() {
 
 export function getHoveredButton() {
     return hoveredButton;
+}
+
+
+export function fingerPokePanel(fingerTipPos) {
+    const modelMatrix = getPanelModelMatrix();
+    const invModel = invertMatrix(modelMatrix);
+    if (!invModel) return null;
+
+    const localPos = transformPoint(invModel, [fingerTipPos.x, fingerTipPos.y, fingerTipPos.z]);
+
+    if (Math.abs(localPos[2]) > 0.06) return null;
+
+    // might need to be adjusted in the future for distance to panel plane
+    if (Math.abs(localPos[0]) > 0.5 || Math.abs(localPos[1]) > 0.5) return null;
+
+    for (const [id, btn] of Object.entries(BUTTONS)) {
+        const scaledX = localPos[0] * PANEL.width;
+        const scaledY = localPos[1] * PANEL.height;
+
+        if (scaledX >= btn.x - btn.width / 2 && scaledX <= btn.x + btn.width / 2 &&
+            scaledY >= btn.y - btn.height / 2 && scaledY <= btn.y + btn.height / 2) {
+            return id;
+        }
+    }
+
+    return null;
 }
 
 // ============================================================================

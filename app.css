@@ -75,7 +75,7 @@ button:active {
 }
 
 .controls {
-    margin-top: 30px;
+    margin-top: 12px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -96,4 +96,44 @@ button:active {
     text-align: center;
     padding: 10px;
     color: var(--gt-white);
+}
+
+#loading-progress {
+    margin-top: 10px;
+    width: 280px;
+    text-align: center;
+    transition: opacity 0.6s ease;
+}
+
+#loading-progress .progress-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+}
+
+#loading-progress .progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    background: var(--gt-gold);
+    transition: width 0.2s ease;
+}
+
+#loading-progress .progress-text {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    opacity: 0.7;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+button:disabled:hover {
+    transform: none;
+    box-shadow: none;
 }

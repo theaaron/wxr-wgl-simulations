@@ -861,6 +861,53 @@ export function resetStructureTransform() {
     structureTransform.scale = 1.0;
 }
 
+export function setHandGrabState(hand, grabbing, matrix, origin) {
+    if (hand === 'left') {
+        grabState.leftGrabbing = grabbing;
+        if (grabbing && matrix && origin) {
+            grabState.leftMatrixAtGrab = new Float32Array(matrix);
+            grabState.leftGrabPoint = [origin.x, origin.y, origin.z];
+            if (hand === 'left') leftController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'left' };
+        }
+    } else {
+        grabState.rightGrabbing = grabbing;
+        if (grabbing && matrix && origin) {
+            grabState.rightMatrixAtGrab = new Float32Array(matrix);
+            grabState.rightGrabPoint = [origin.x, origin.y, origin.z];
+            if (hand === 'right') rightController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'right' };
+        }
+    }
+
+    if (grabbing) {
+        grabState.structureAtGrab = {
+            position: [...structureTransform.position],
+            rotation: new Float32Array(structureTransform.rotation),
+            scale: structureTransform.scale
+        };
+        const grabPt = hand === 'left' ? grabState.leftGrabPoint : grabState.rightGrabPoint;
+        grabState.structureOffsetAtGrab = [
+            structureTransform.position[0] - grabPt[0],
+            structureTransform.position[1] - grabPt[1],
+            structureTransform.position[2] - grabPt[2]
+        ];
+        if (grabState.leftGrabbing && grabState.rightGrabbing) {
+            grabState.initialHandDistance = getHandDistance();
+            grabState.midpointAtGrab = getHandMidpoint();
+        }
+    }
+}
+
+export function updateHandControllerPose(hand, matrix) {
+    const pose = {
+        matrix,
+        origin: { x: matrix[12], y: matrix[13], z: matrix[14] },
+        direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] },
+        handedness: hand
+    };
+    if (hand === 'left') leftController = pose;
+    else rightController = pose;
+}
+
 // matrix math helpers (column-major for WebGL)
 function multiplyMat4(a, b) {
     const out = new Float32Array(16);

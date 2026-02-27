@@ -1,17 +1,19 @@
 import { cubeSize, indices, vertices } from "./cube.js";
 import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
-import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors } from "./rendering/renderStructure.js";
+import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors, setStructureData } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
 import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
-import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, getLeftController, getRightController } from "./rendering/vrControllers.js";
-import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel } from "./rendering/vrPanel.js";
+import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, processControllerPick, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, getLeftController, getRightController } from "./rendering/vrControllers.js";
+import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel, fingerPokePanel } from "./rendering/vrPanel.js";
 import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 import { loadLabModel, renderLab, isLabLoaded } from "./rendering/renderLab.js";
-// import { updateHandTracking } from "./rendering/handTracking.js";
+import { updateHandTracking, getFingerRay, processFingerPickResult, processFingerPanelPoke, consumeFingerTap, consumeFingerPanelPoke } from "./rendering/handTracking.js";
+import { loadStructure } from "./rendering/loadStructure.js";
+import { initLoadingProgress, fetchWithProgress, onAllLoaded } from "./loadingProgress.js";
 
 // simple mat4 utility for non-VR rendering
 const mat4 = {
@@ -612,10 +614,10 @@ function onXRFrame(time, frame) {
     xrSession.requestAnimationFrame(onXRFrame);
 
     updateControllers(frame, xrReferenceSpace);
-    // updateHandTracking(frame, xrReferenceSpace);
+    updateHandTracking(frame, xrReferenceSpace);
     updateStructureManipulation();
 
-    // update panel hover state
+    // update panel hover state (controller rays)
     updatePanelHover(getLeftController(), getRightController());
 
     // process any pending controller picks
@@ -631,6 +633,41 @@ function onXRFrame(time, frame) {
             getPositionBuffer(),
             getInstanceIDBuffer()
         );
+
+        // finger-based voxel tap: GPU-pick from fingertip, detect touch
+        const modelMatrix = getStructureModelMatrix();
+        for (const hand of ['left', 'right']) {
+            const fingerRay = getFingerRay(hand);
+            if (fingerRay) {
+                const pickResult = processControllerPick(
+                    gl, fingerRay, cubeBuffer, indexBuffer, modelMatrix,
+                    pickingProgram, structure, getPositionBuffer(), getInstanceIDBuffer()
+                );
+                processFingerPickResult(hand, pickResult);
+
+                const tap = consumeFingerTap(hand);
+                if (tap) {
+                    if (window.addPickedVoxel) {
+                        window.addPickedVoxel(tap.instanceID);
+                    }
+                    console.log(`✋ ${hand.toUpperCase()} HAND TAP picked voxel #${tap.instanceID} at (${tap.x}, ${tap.y}, ${tap.z})`);
+                }
+            }
+        }
+    }
+
+    // finger-based panel poke: check fingertip proximity to panel buttons
+    for (const hand of ['left', 'right']) {
+        const fingerRay = getFingerRay(hand);
+        if (fingerRay) {
+            const buttonId = fingerPokePanel(fingerRay.origin);
+            processFingerPanelPoke(hand, buttonId);
+
+            if (consumeFingerPanelPoke(hand) && buttonId) {
+                triggerPanelButton(buttonId);
+                console.log(`✋ ${hand.toUpperCase()} HAND POKED panel button: ${buttonId}`);
+            }
+        }
     }
 
     // initialize simulation once structure is loaded
@@ -789,6 +826,9 @@ window.addEventListener('load', async () => {
         return;
     }
 
+    const container = vrButton.parentElement;
+    initLoadingProgress(vrButton, container);
+
     // voxel scale slider for proper size of the cubes. probably no longer needed. 
     const scaleSlider = document.getElementById('voxel-scale');
     const scaleValue = document.getElementById('scale-value');
@@ -805,15 +845,39 @@ window.addEventListener('load', async () => {
         return;
     }
 
-    // Load lab model
-    try {
-        const glbPath = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
-        // const glbPath = './resources/cath-lab.glb';
-        await loadLabModel(gl, glbPath);
-        updateStatus('Lab model loaded');
-    } catch (error) {
-        console.error('Failed to load lab model:', error);
-        updateStatus('Lab model failed to load, continuing without it');
+    const structureUrl = PATH;
+    const labUrl = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
+
+    const [structureBuffer, labBuffer] = await Promise.all([
+        fetchWithProgress('Heart structure', structureUrl).catch(err => {
+            console.error('Failed to load structure:', err);
+            return null;
+        }),
+        fetchWithProgress('Lab environment', labUrl).catch(err => {
+            console.error('Failed to load lab model:', err);
+            return null;
+        })
+    ]);
+
+    if (structureBuffer) {
+        try {
+            const jsonText = new TextDecoder().decode(structureBuffer);
+            const jsonData = JSON.parse(jsonText);
+            const struct = await loadStructure(jsonData);
+            setStructureData(gl, struct);
+        } catch (err) {
+            console.error('Failed to process structure data:', err);
+        }
+    }
+
+    if (labBuffer) {
+        try {
+            await loadLabModel(gl, labBuffer);
+            updateStatus('Lab model loaded');
+        } catch (err) {
+            console.error('Failed to process lab model:', err);
+            updateStatus('Lab model failed to load, continuing without it');
+        }
     }
 
     if (!navigator.xr) {
