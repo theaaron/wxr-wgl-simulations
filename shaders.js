@@ -42,6 +42,7 @@ export const SIMPLE_VS = `#version 300 es
     out vec3 v_position;
     out vec3 v_normal;
     out vec3 v_color;
+    out float v_shade;
 
     vec3 voltageColormap(float v) {
         const vec3 cmap[11] = vec3[11](
@@ -75,13 +76,19 @@ export const SIMPLE_VS = `#version 300 es
         v_position = viewPos.xyz;
         v_normal = mat3(u_normalMatrix) * a_instanceNormal;
 
+        bool isSurface = length(a_instanceNormal) > 0.1;
+        float voltage = 0.0;
+
         if (u_useSimTexture && u_simTexWidth > 0) {
             ivec2 texCoord = ivec2(gl_InstanceID % u_simTexWidth, gl_InstanceID / u_simTexWidth);
-            float voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
-            v_color = voltageColormap(voltage);
+            voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
+            v_color = isSurface ? voltageColormap(voltage) : voltageColormap(voltage);
         } else {
             v_color = a_color;
         }
+
+        // hide interior voxels at rest; show surface voxels always
+        v_shade = (isSurface || voltage >= 0.1) ? 1.0 : 0.0;
     }
 `;
 
@@ -105,10 +112,13 @@ export const SIMPLE_FS = `#version 300 es
     in vec3 v_position;  // in view space
     in vec3 v_normal;    // transformed by normalMatrix
     in vec3 v_color;
+    in float v_shade;
     
     out vec4 fragColor;
     
     void main() {
+        if (v_shade < 0.5) discard;
+
         vec3 N = normalize(v_normal);
         vec3 E = normalize(-v_position);  // eye vector in view space
         
@@ -238,6 +248,7 @@ export const APPROX_VS = `#version 300 es
     out vec3 v_normal;
     out vec3 v_color;
     out float v_depth;
+    out float v_shade;
 
     vec3 voltageColormap(float v) {
         const vec3 cmap[11] = vec3[11](
@@ -273,13 +284,19 @@ export const APPROX_VS = `#version 300 es
         v_normal = mat3(u_normalMatrix) * a_instanceNormal;
         v_depth = clipPos.z / clipPos.w * 0.5 + 0.5;
 
+        bool isSurface = length(a_instanceNormal) > 0.1;
+        float voltage = 0.0;
+
         if (u_useSimTexture && u_simTexWidth > 0) {
             ivec2 texCoord = ivec2(gl_InstanceID % u_simTexWidth, gl_InstanceID / u_simTexWidth);
-            float voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
+            voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
             v_color = voltageColormap(voltage);
         } else {
             v_color = a_color;
         }
+
+        // hide interior voxels at rest; show surface voxels always
+        v_shade = (isSurface || voltage >= 0.1) ? 1.0 : 0.0;
     }
 `;
 
@@ -305,11 +322,14 @@ export const APPROX_FS = `#version 300 es
     in vec3 v_normal;    // transformed by normalMatrix
     in vec3 v_color;
     in float v_depth;
+    in float v_shade;
     
     layout(location = 0) out vec4 accumColor;
     layout(location = 1) out vec4 revealage;
     
     void main() {
+        if (v_shade < 0.5) discard;
+
         vec3 N = normalize(v_normal);
         vec3 E = normalize(-v_position);  // eye vector in view space
         

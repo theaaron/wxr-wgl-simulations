@@ -43,7 +43,7 @@ let quadBuffer = null;
 const params = {
     dt: 0.1,            // time step (ms) - matching original Abubu
     diffCoef: 0.001337, // diffusion coefficient (Patient 1-Alt value)
-    lx: 12.0,           // domain size - scaled for 192 resolution (8 * 192/128 = 12)
+    lx: 8.0,            // domain size (cm) — overwritten at init: 0.0625 * resolution
     C_m: 1.0,           // membrane capacitance
     
     // Patient 1-Alt model parameters (from original Abubu)
@@ -375,8 +375,11 @@ export function initCardiacSimulation(glContext, structure) {
     fullHeight = meta.fullHeight;
     mx = meta.mx;
     my = meta.my;
+
+    // dx = lx / resolution must equal 0.0625 cm for correct wave speed
+    params.lx = 0.0625 * (fullWidth / mx);
     
-    console.log('Initializing cardiac simulation');
+    console.log(`Initializing cardiac simulation (resolution=${fullWidth/mx}, lx=${params.lx})`);
     
     // create fullscreen quad
     createQuad();

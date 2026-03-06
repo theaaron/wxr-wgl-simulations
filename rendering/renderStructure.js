@@ -254,9 +254,9 @@ function computeSurfaceNormals(structure) {
             normals[i * 3 + 1] = ny / len;
             normals[i * 3 + 2] = nz / len;
         } else {
-            // interior voxel, use default up normal
+            // interior voxel — zero vector signals "not a surface voxel" to the shader
             normals[i * 3 + 0] = 0;
-            normals[i * 3 + 1] = 1;
+            normals[i * 3 + 1] = 0;
             normals[i * 3 + 2] = 0;
         }
     }
