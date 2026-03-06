@@ -305,6 +305,7 @@ export function setupControllerInput(session) {
 
 function onSelect(event) {
     const inputSource = event.inputSource;
+    if (inputSource.hand) return;
 
     if (inputSource.targetRayMode === 'tracked-pointer') {
         const hand = inputSource.handedness;
@@ -348,6 +349,7 @@ function onSelectEnd(event) { }
 function onSqueeze(event) { }
 
 function onSqueezeStart(event) {
+    if (event.inputSource.hand) return;
     const hand = event.inputSource.handedness;
 
     if (hand === 'left' && leftController) {
@@ -383,6 +385,7 @@ function onSqueezeStart(event) {
 }
 
 function onSqueezeEnd(event) {
+    if (event.inputSource.hand) return;
     const hand = event.inputSource.handedness;
     if (hand === 'left') grabState.leftGrabbing = false;
     else if (hand === 'right') grabState.rightGrabbing = false;
@@ -623,8 +626,11 @@ function invertMatrix(mat) {
 export function updateControllers(frame, referenceSpace) {
     if (!frame || !referenceSpace) return;
 
+    leftController = null;
+    rightController = null;
+
     for (const inputSource of frame.session.inputSources) {
-        if (inputSource.targetRayMode === 'tracked-pointer') {
+        if (inputSource.targetRayMode === 'tracked-pointer' && !inputSource.hand) {
             const pose = frame.getPose(inputSource.targetRaySpace, referenceSpace);
 
             if (pose) {
