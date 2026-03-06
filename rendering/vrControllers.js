@@ -670,7 +670,7 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     let leftPanelDist = null;
     let rightPanelDist = null;
 
-    if (leftController) {
+    if (leftController && !leftController.isHand) {
         const panelHit = rayIntersectsPanel(leftController.origin, leftController.direction);
         if (panelHit) {
             leftHoveringButton = true;
@@ -678,7 +678,7 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
         }
     }
 
-    if (rightController) {
+    if (rightController && !rightController.isHand) {
         const panelHit = rayIntersectsPanel(rightController.origin, rightController.direction);
         if (panelHit) {
             rightHoveringButton = true;
@@ -707,7 +707,7 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
 
-    if (leftController) {
+    if (leftController && !leftController.isHand) {
         const hasStructureHit = lastLeftPick !== null;
         let leftColor = RAY_COLOR;
         if (leftHoveringButton) {
@@ -726,7 +726,7 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
         gl.drawElements(gl.TRIANGLES, rayCylinderIndexCount, gl.UNSIGNED_SHORT, 0);
     }
 
-    if (rightController) {
+    if (rightController && !rightController.isHand) {
         const hasStructureHit = lastRightPick !== null;
         let rightColor = RAY_COLOR;
         if (rightHoveringButton) {
@@ -916,7 +916,8 @@ export function updateHandControllerPose(hand, matrix) {
         matrix,
         origin: { x: matrix[12], y: matrix[13], z: matrix[14] },
         direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] },
-        handedness: hand
+        handedness: hand,
+        isHand: true,
     };
     if (hand === 'left') leftController = pose;
     else rightController = pose;
