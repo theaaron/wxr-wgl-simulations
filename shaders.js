@@ -34,10 +34,36 @@ export const SIMPLE_VS = `#version 300 es
     uniform mat4 u_modelMatrix;
     uniform mat4 u_normalMatrix;
     uniform float u_cubeScale;
+
+    uniform highp sampler2D u_voltageTexture;
+    uniform int u_simTexWidth;
+    uniform bool u_useSimTexture;
     
     out vec3 v_position;
     out vec3 v_normal;
     out vec3 v_color;
+
+    vec3 voltageColormap(float v) {
+        const vec3 cmap[11] = vec3[11](
+            vec3(0.85, 0.85, 0.85),
+            vec3(0.7,  0.7,  0.9),
+            vec3(0.4,  0.5,  1.0),
+            vec3(0.0,  0.7,  1.0),
+            vec3(0.0,  1.0,  0.8),
+            vec3(0.2,  1.0,  0.4),
+            vec3(0.6,  1.0,  0.0),
+            vec3(1.0,  1.0,  0.0),
+            vec3(1.0,  0.6,  0.0),
+            vec3(1.0,  0.3,  0.0),
+            vec3(1.0,  0.0,  0.0)
+        );
+        v = clamp(v, 0.0, 1.0);
+        float idx = v * 10.0;
+        int i0 = int(floor(idx));
+        int i1 = min(i0 + 1, 10);
+        float t = idx - float(i0);
+        return mix(cmap[i0], cmap[i1], t);
+    }
     
     void main() {
         vec3 scaledCubeVertex = a_position * u_cubeScale;
@@ -46,11 +72,16 @@ export const SIMPLE_VS = `#version 300 es
         vec4 viewPos = u_viewMatrix * worldPos;
         gl_Position = u_projectionMatrix * viewPos;
         
-        // position in view space for specular calculation
         v_position = viewPos.xyz;
-        // transform normal using normalMatrix (inverse-transpose of modelView)
         v_normal = mat3(u_normalMatrix) * a_instanceNormal;
-        v_color = a_color;
+
+        if (u_useSimTexture && u_simTexWidth > 0) {
+            ivec2 texCoord = ivec2(gl_InstanceID % u_simTexWidth, gl_InstanceID / u_simTexWidth);
+            float voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
+            v_color = voltageColormap(voltage);
+        } else {
+            v_color = a_color;
+        }
     }
 `;
 
@@ -198,11 +229,37 @@ export const APPROX_VS = `#version 300 es
     uniform mat4 u_modelMatrix;
     uniform mat4 u_normalMatrix;
     uniform float u_cubeScale;
+
+    uniform highp sampler2D u_voltageTexture;
+    uniform int u_simTexWidth;
+    uniform bool u_useSimTexture;
     
     out vec3 v_position;
     out vec3 v_normal;
     out vec3 v_color;
     out float v_depth;
+
+    vec3 voltageColormap(float v) {
+        const vec3 cmap[11] = vec3[11](
+            vec3(0.85, 0.85, 0.85),
+            vec3(0.7,  0.7,  0.9),
+            vec3(0.4,  0.5,  1.0),
+            vec3(0.0,  0.7,  1.0),
+            vec3(0.0,  1.0,  0.8),
+            vec3(0.2,  1.0,  0.4),
+            vec3(0.6,  1.0,  0.0),
+            vec3(1.0,  1.0,  0.0),
+            vec3(1.0,  0.6,  0.0),
+            vec3(1.0,  0.3,  0.0),
+            vec3(1.0,  0.0,  0.0)
+        );
+        v = clamp(v, 0.0, 1.0);
+        float idx = v * 10.0;
+        int i0 = int(floor(idx));
+        int i1 = min(i0 + 1, 10);
+        float t = idx - float(i0);
+        return mix(cmap[i0], cmap[i1], t);
+    }
     
     void main() {
         vec3 scaledCubeVertex = a_position * u_cubeScale;
@@ -212,12 +269,17 @@ export const APPROX_VS = `#version 300 es
         vec4 clipPos = u_projectionMatrix * viewPos;
         gl_Position = clipPos;
         
-        // position in view space for specular calculation
         v_position = viewPos.xyz;
-        // transform normal using normalMatrix (inverse-transpose of modelView)
         v_normal = mat3(u_normalMatrix) * a_instanceNormal;
-        v_color = a_color;
         v_depth = clipPos.z / clipPos.w * 0.5 + 0.5;
+
+        if (u_useSimTexture && u_simTexWidth > 0) {
+            ivec2 texCoord = ivec2(gl_InstanceID % u_simTexWidth, gl_InstanceID / u_simTexWidth);
+            float voltage = texelFetch(u_voltageTexture, texCoord, 0).r;
+            v_color = voltageColormap(voltage);
+        } else {
+            v_color = a_color;
+        }
     }
 `;
 

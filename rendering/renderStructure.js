@@ -8,6 +8,20 @@ let cachedColorArray = null;
 let lastColorUploadFrame = -1;
 let frameId = 0;
 
+// GPU-direct voltage texture (bypasses CPU readback)
+let activeVoltageTexture = null;
+let simTextureWidth = 0;
+
+export function setActiveVoltageTexture(tex, width) {
+    activeVoltageTexture = tex;
+    simTextureWidth = width;
+}
+
+export function clearActiveVoltageTexture() {
+    activeVoltageTexture = null;
+    simTextureWidth = 0;
+}
+
 export function setVoltageColors(colors) {
     voltageColors = colors;
     colorsDirty = true;
@@ -396,14 +410,30 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
     if (useVertexColorLoc !== null) {
         gl.uniform1i(useVertexColorLoc, 1);
     }
+
+    // GPU-direct voltage texture: bind simulation output directly to shader
+    const useSimTexLoc = gl.getUniformLocation(program, 'u_useSimTexture');
+    const simTexWidthLoc = gl.getUniformLocation(program, 'u_simTexWidth');
+    const voltageTexLoc = gl.getUniformLocation(program, 'u_voltageTexture');
+    const useGPUDirect = activeVoltageTexture !== null;
+
+    if (useGPUDirect && useSimTexLoc !== null) {
+        gl.uniform1i(useSimTexLoc, 1);
+        if (simTexWidthLoc !== null) gl.uniform1i(simTexWidthLoc, simTextureWidth);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, activeVoltageTexture);
+        if (voltageTexLoc !== null) gl.uniform1i(voltageTexLoc, 0);
+    } else if (useSimTexLoc !== null) {
+        gl.uniform1i(useSimTexLoc, 0);
+    }
     
     // position buffer is static — built once in createPositionBuffer / setStructureData
     if (!renderStructure.positionBuffer) {
         createPositionBuffer(gl, structure);
     }
 
-    // color buffer — only rebuild + upload once per frame when something changed
-    if (colorsDirty && lastColorUploadFrame !== frameId) {
+    // color buffer — skip rebuild when GPU-direct voltage texture is active
+    if (!useGPUDirect && colorsDirty && lastColorUploadFrame !== frameId) {
         lastColorUploadFrame = frameId;
         colorsDirty = false;
 
@@ -439,6 +469,20 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.colorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, cachedColorArray, gl.DYNAMIC_DRAW);
+    }
+
+    // ensure color buffer exists with default gray even if GPU-direct is active
+    if (!renderStructure.colorBuffer) {
+        cachedColorArray = new Float32Array(numCubes * 3);
+        for (let i = 0; i < numCubes * 3; i += 3) {
+            cachedColorArray[i] = 0.85;
+            cachedColorArray[i + 1] = 0.85;
+            cachedColorArray[i + 2] = 0.85;
+        }
+        renderStructure.colorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.colorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, cachedColorArray, gl.DYNAMIC_DRAW);
+        colorsDirty = false;
     }
     
     const posLoc = gl.getAttribLocation(program, 'a_position');

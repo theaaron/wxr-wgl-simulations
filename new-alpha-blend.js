@@ -1,6 +1,6 @@
 import { cubeSize, indices, vertices } from "./cube.js";
 import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
-import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors, setStructureData, beginFrame } from "./rendering/renderStructure.js";
+import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors, setStructureData, beginFrame, setActiveVoltageTexture, clearActiveVoltageTexture } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
@@ -8,7 +8,7 @@ import { drawDNAHelix } from "./rendering/drawDNAHelix.js";
 import { drawHelixCubes } from "./rendering/drawHelixCubes.js";
 import { initVRControllers, setupControllerInput, updateControllers, renderControllerRays, checkAndProcessPicks, processControllerPick, updateStructureManipulation, getStructureModelMatrix, resetStructureTransform, setPaceCallback, getLeftController, getRightController, isControllerSqueezing } from "./rendering/vrControllers.js";
 import { initVRPanel, setPanelCallbacks, updatePanelHover, renderVRPanel, triggerPanelButton, isHoveringPanel, fingerPokePanel, updatePanelGrab, isPanelGrabbed } from "./rendering/vrPanel.js";
-import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking } from "./simulation/cardiacCompute.js";
+import { initCardiacSimulation, stepSimulation, paceAt, isInitialized as isSimInitialized, isRunning, setRunning, readVoltageData, getStepsPerFrame, isSimulationWorking, getVoltageTexture, getCompressedDimensions } from "./simulation/cardiacCompute.js";
 import { voltageToColors, buildVoxelToTexelMap } from "./simulation/colormap.js";
 import { loadLabModel, renderLab, isLabLoaded } from "./rendering/renderLab.js";
 import { updateHandTracking, getFingerRay, processFingerPickResult, processFingerPanelPoke, consumeFingerTap, consumeFingerPanelPoke, isHandPinching } from "./rendering/handTracking.js";
@@ -748,14 +748,13 @@ function onXRFrame(time, frame) {
     if (simulationInitialized && isSimulationWorking() && simulationRunning) {
         stepSimulation(getStepsPerFrame());
 
-        // update voltage colors
-        if (structure && voxelToTexelMap) {
-            const voltageData = readVoltageData();
-            if (voltageData) {
-                const colors = voltageToColors(voltageData, structure.voxels.length, voxelToTexelMap);
-                setVoltageColors(colors);
-            }
+        // GPU-direct: pass simulation texture straight to the rendering shader
+        const dims = getCompressedDimensions();
+        if (dims.width > 0) {
+            setActiveVoltageTexture(getVoltageTexture(), dims.width);
         }
+    } else {
+        clearActiveVoltageTexture();
     }
 
     const pose = frame.getViewerPose(xrReferenceSpace);
@@ -1071,17 +1070,16 @@ window.addEventListener('load', async () => {
             }
         }
 
-        // run simulation and update colors
+        // run simulation and update colors (GPU-direct)
         if (simulationInitialized && isSimulationWorking() && simulationRunning) {
             stepSimulation(getStepsPerFrame());
 
-            if (structure && voxelToTexelMap) {
-                const voltageData = readVoltageData();
-                if (voltageData) {
-                    const colors = voltageToColors(voltageData, structure.voxels.length, voxelToTexelMap);
-                    setVoltageColors(colors);
-                }
+            const dims = getCompressedDimensions();
+            if (dims.width > 0) {
+                setActiveVoltageTexture(getVoltageTexture(), dims.width);
             }
+        } else {
+            clearActiveVoltageTexture();
         }
 
         // simple 2D render for desktop preview
