@@ -3,13 +3,23 @@ import { loadStructure } from './loadStructure.js';
 
 // voltage coloring support
 let voltageColors = null;
+let colorsDirty = true;
+let cachedColorArray = null;
+let lastColorUploadFrame = -1;
+let frameId = 0;
 
 export function setVoltageColors(colors) {
     voltageColors = colors;
+    colorsDirty = true;
 }
 
 export function clearVoltageColors() {
     voltageColors = null;
+    colorsDirty = true;
+}
+
+export function beginFrame() {
+    frameId++;
 }
 
 // ============================================================================
@@ -77,7 +87,8 @@ const pickedVoxels = new Set();
 
 export function addPickedVoxel(instanceID) {
     pickedVoxels.add(instanceID);
-    console.log(`✅ Added voxel ${instanceID} to picked set`);
+    colorsDirty = true;
+    console.log(`Added voxel ${instanceID} to picked set`);
 }
 
 // getters for buffers (for VR controller picking)
@@ -303,15 +314,9 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         return;
     }
     
-    if (!renderStructure.frameCounter) {
-        renderStructure.frameCounter = 0;
-        renderStructure.callsThisFrame = 0;
-    }
-    renderStructure.callsThisFrame++;
-    if (Date.now() - (renderStructure.lastLog || 0) > 5000) {
-        console.log(`Render calls per frame: ${renderStructure.callsThisFrame}. Rendering ${numCubes}/${structure.voxels.length} voxels`);
-        renderStructure.lastLog = Date.now();
-        renderStructure.callsThisFrame = 0;
+    if (!renderStructure.loggedOnce) {
+        console.log(`renderStructure: ${numCubes} voxels, static position buffer, cached colors`);
+        renderStructure.loggedOnce = true;
     }
 
     gl.useProgram(program);
@@ -392,56 +397,49 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
         gl.uniform1i(useVertexColorLoc, 1);
     }
     
-    const structurePositions = new Float32Array(numCubes * 3);
-    const structureColors = new Float32Array(numCubes * 3);
-    
-    const centerX = structure.dimensions.nx / 2;
-    const centerY = structure.dimensions.ny / 2;
-    const centerZ = structure.dimensions.nz / 2;
-    
-    for (let i = 0; i < numCubes; i++) {
-        const voxel = structure.voxels[i];
-        
-        structurePositions[i * 3] = voxel.x - centerX;
-        structurePositions[i * 3 + 1] = voxel.y - centerY;
-        structurePositions[i * 3 + 2] = voxel.z - centerZ;
-        
-        // check if this voxel has been picked - if so, make it red
-        if (pickedVoxels.has(i)) {
-            structureColors[i * 3] = 1.0;     // R
-            structureColors[i * 3 + 1] = 0.0; // G
-            structureColors[i * 3 + 2] = 0.0; // B
-        } else if (voltageColors && voltageColors.length >= (i + 1) * 3) {
-            // use voltage colors from simulation
-            structureColors[i * 3] = voltageColors[i * 3];
-            structureColors[i * 3 + 1] = voltageColors[i * 3 + 1];
-            structureColors[i * 3 + 2] = voltageColors[i * 3 + 2];
-        } else {
-            // default color: light gray (matches resting state in colormap)
-            structureColors[i * 3] = 0.85;
-            structureColors[i * 3 + 1] = 0.85;
-            structureColors[i * 3 + 2] = 0.85;
-        }
-    }
-    
-    // this is just to log the first few pos/cols for debugging
-    if (!renderStructure.loggedPositions) {
-        console.log('First 5 voxel positions:', structurePositions.slice(0, 15));
-        console.log('Center offsets:', { centerX, centerY, centerZ });
-        console.log('Buffer size:', structurePositions.length, 'floats for', numCubes, 'cubes');
-        renderStructure.loggedPositions = true;
-    }
-    
+    // position buffer is static — built once in createPositionBuffer / setStructureData
     if (!renderStructure.positionBuffer) {
-        renderStructure.positionBuffer = gl.createBuffer();
-        renderStructure.colorBuffer = gl.createBuffer();
+        createPositionBuffer(gl, structure);
     }
-    
-    gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, structurePositions, gl.DYNAMIC_DRAW);
-    
-    gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, structureColors, gl.DYNAMIC_DRAW);
+
+    // color buffer — only rebuild + upload once per frame when something changed
+    if (colorsDirty && lastColorUploadFrame !== frameId) {
+        lastColorUploadFrame = frameId;
+        colorsDirty = false;
+
+        if (!cachedColorArray || cachedColorArray.length !== numCubes * 3) {
+            cachedColorArray = new Float32Array(numCubes * 3);
+        }
+
+        const hasPicked = pickedVoxels.size > 0;
+        const hasVoltage = voltageColors && voltageColors.length >= numCubes * 3;
+
+        if (!hasPicked && hasVoltage) {
+            cachedColorArray.set(voltageColors);
+        } else {
+            for (let i = 0; i < numCubes; i++) {
+                if (hasPicked && pickedVoxels.has(i)) {
+                    cachedColorArray[i * 3] = 1.0;
+                    cachedColorArray[i * 3 + 1] = 0.0;
+                    cachedColorArray[i * 3 + 2] = 0.0;
+                } else if (hasVoltage) {
+                    cachedColorArray[i * 3] = voltageColors[i * 3];
+                    cachedColorArray[i * 3 + 1] = voltageColors[i * 3 + 1];
+                    cachedColorArray[i * 3 + 2] = voltageColors[i * 3 + 2];
+                } else {
+                    cachedColorArray[i * 3] = 0.85;
+                    cachedColorArray[i * 3 + 1] = 0.85;
+                    cachedColorArray[i * 3 + 2] = 0.85;
+                }
+            }
+        }
+
+        if (!renderStructure.colorBuffer) {
+            renderStructure.colorBuffer = gl.createBuffer();
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, renderStructure.colorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, cachedColorArray, gl.DYNAMIC_DRAW);
+    }
     
     const posLoc = gl.getAttribLocation(program, 'a_position');
     const instPosLoc = gl.getAttribLocation(program, 'a_instancePosition');
@@ -720,7 +718,7 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
     console.log(`    Valid voxel picked!`);
     
     pickedVoxels.add(instanceID);
-    console.log(`    Marked voxel ${instanceID} as picked (total picked: ${pickedVoxels.size})`);
+    colorsDirty = true;
     
     const voxel = structure.voxels[instanceID];
     
@@ -748,6 +746,6 @@ export function pickVoxel(gl, instancingExt, cubeBuffer, indexBuffer, mouseX, mo
 // reset function for picked voxels
 export function clearPickedVoxels() {
     pickedVoxels.clear();
-    console.log('🔄 Cleared all picked voxels');
+    colorsDirty = true;
 }
 

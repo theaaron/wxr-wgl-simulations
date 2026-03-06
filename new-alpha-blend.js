@@ -1,6 +1,6 @@
 import { cubeSize, indices, vertices } from "./cube.js";
 import { APPROX_COMPOSITE_FS, APPROX_COMPOSITE_VS, APPROX_FS, APPROX_VS, SIMPLE_FS, SIMPLE_VS, PICKER_VS_SIMPLE, PICKER_FS } from "./shaders.js";
-import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors, setStructureData } from "./rendering/renderStructure.js";
+import { renderStructure, pickVoxel, clearPickedVoxels, addPickedVoxel, getPositionBuffer, getInstanceIDBuffer, getStructure, setVoltageColors, setStructureData, beginFrame } from "./rendering/renderStructure.js";
 import { renderCubes } from "./rendering/renderCubes.js";
 import { renderTestPlanes } from "./rendering/renderTestPlanes.js";
 import { drawHelix } from "./rendering/drawHelix.js";
@@ -611,6 +611,7 @@ function onXRFrame(time, frame) {
     if (!onXRFrame.frameCount) onXRFrame.frameCount = 0;
     onXRFrame.frameCount++;
 
+    beginFrame();
     xrSession.requestAnimationFrame(onXRFrame);
 
     updateControllers(frame, xrReferenceSpace);
@@ -1052,6 +1053,8 @@ window.addEventListener('load', async () => {
 
         // skip if XR session is active
         if (xrSession) return;
+
+        beginFrame();
 
         const structure = getStructure();
 
