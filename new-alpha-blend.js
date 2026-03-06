@@ -56,10 +56,21 @@ const mat4 = {
     }
 };
 
-// export const PATH = './resources/13-350um-192x192x192_lra_grid.json';
-// export const PATH = './resources/atria_64x64x64.json';
+// hi-res vercel blob
+// export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
 
-export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
+const STRUCTURE_PATHS = {
+    whole:      './resources/whole_64x64x64.json',
+    atria:      './resources/atria.json',
+    ventricle:  './resources/ventricle_64x64x64.json',
+};
+
+function getSelectedStructurePath() {
+    const selected = document.querySelector('input[name="structure"]:checked');
+    return STRUCTURE_PATHS[selected?.value] || STRUCTURE_PATHS.whole;
+}
+
+export let PATH = STRUCTURE_PATHS.whole;
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -843,6 +854,9 @@ window.addEventListener('load', async () => {
 
     const container = vrButton.parentElement;
     initLoadingProgress(vrButton, container);
+
+    // read selected structure from radio buttons
+    PATH = getSelectedStructurePath();
 
     // voxel scale slider for proper size of the cubes. probably no longer needed. 
     const scaleSlider = document.getElementById('voxel-scale');

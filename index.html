@@ -9,6 +9,12 @@
 <body>
     <canvas id="xr-canvas"></canvas>
     <div class="container">
+        <fieldset id="structure-select">
+            <legend>Structure</legend>
+            <label><input type="radio" name="structure" value="whole" checked> Whole Heart</label>
+            <label><input type="radio" name="structure" value="atria"> Atria</label>
+            <label><input type="radio" name="structure" value="ventricle"> Ventricle</label>
+        </fieldset>
         <button id="vr-button">Enter VR</button>
         <div class="controls">
             <label for="voxel-scale">Voxel Size: <span id="scale-value">5.0</span>x</label>
