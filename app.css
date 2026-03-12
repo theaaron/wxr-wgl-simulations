@@ -165,3 +165,17 @@ button:disabled:hover {
 #structure-select input[type="radio"] {
     accent-color: var(--gt-gold);
 }
+
+.nav-link {
+    margin-top: 16px;
+    color: var(--gt-gold);
+    font-size: 0.9rem;
+    text-decoration: none;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.nav-link:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
