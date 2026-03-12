@@ -60,9 +60,9 @@ const mat4 = {
 // export const PATH = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json';
 
 const STRUCTURE_PATHS = {
-    whole:      './resources/whole_64x64x64.json',
-    atria:      './resources/atria.json',
-    ventricle:  './resources/ventricle_64x64x64.json',
+    whole: './resources/whole_64x64x64.json',
+    atria: './resources/atria.json',
+    ventricle: './resources/ventricle_64x64x64.json',
 };
 
 function getSelectedStructurePath() {
