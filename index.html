@@ -7,23 +7,23 @@
     <link rel="stylesheet" href="app.css">
 </head>
 <body>
-    <canvas id="xr-canvas"></canvas>
     <div class="container">
         <fieldset id="structure-select">
             <legend>Structure</legend>
-            <label><input type="radio" name="structure" value="whole" checked> Whole Heart</label>
+            <label><input type="radio" name="structure" value="whole" checked> Whole</label>
             <label><input type="radio" name="structure" value="atria"> Atria</label>
             <label><input type="radio" name="structure" value="ventricle"> Ventricle</label>
         </fieldset>
-        <button id="vr-button">Enter VR</button>
+
+        <button id="vr-button" disabled>Enter VR</button>
+
         <div class="controls">
             <label for="voxel-scale">Voxel Size: <span id="scale-value">5.0</span>x</label>
             <input type="range" id="voxel-scale" min="0.5" max="10.0" step="0.5" value="5.0">
         </div>
     </div>
-    <div id="status"></div>
+    <div id="status">Initializing…</div>
+    <script type="module" src="new-depth-peel.js"></script>
 </body>
-<!-- <script type="module" src="approx-alpha-blend.js"></script> -->
-<script type="module" src="new-alpha-blend.js"></script>
-<!-- <script type="module" src="depth-peeling.js"></script> -->
+
 </html>
