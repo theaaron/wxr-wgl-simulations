@@ -1,4 +1,3 @@
-import { PATH } from '../new-alpha-blend.js';
 import { loadStructure } from './loadStructure.js';
 
 // voltage coloring support
@@ -287,7 +286,6 @@ export async function renderStructure(gl, instancingExt, cubeBuffer, indexBuffer
 
     // start loading if not already loading or loaded
     if (!renderStructure.cachedStructure && !renderStructure.loading) {
-        path = PATH
         console.log('Starting structure load...');
         renderStructure.loading = loadStructure(path).then(struct => {
             renderStructure.cachedStructure = struct;

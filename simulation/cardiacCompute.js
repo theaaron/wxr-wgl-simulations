@@ -79,7 +79,7 @@ let stepsPerFrame = 20;  // matching original: skip=10 with 2 passes per iterati
 
 // shader sources
 const quadVS = `#version 300 es
-in vec2 a_position;
+layout(location = 0) in vec2 a_position;
 out vec2 cc;
 void main() {
     cc = a_position * 0.5 + 0.5;
@@ -99,19 +99,16 @@ uniform int mx, my;
 layout(location = 0) out uvec4 odir0;
 layout(location = 1) out uvec4 odir1;
 
-ivec3 getIdx(ivec2 texelPos, ivec3 size) {
-    int I = texelPos.x;
-    int J = texelPos.y;
-    int i = I % size.x;
-    int j = J % size.y;
-    int k = (I / size.x) + (size.z / my - 1 - J / size.y) * mx;
-    return ivec3(i, j, k);
+ivec3 getIdx(ivec2 IJ, ivec3 size) {
+    int si = IJ.x / size.x;
+    int sj = (my - 1) - (IJ.y / size.y);
+    return ivec3(IJ.x % size.x, IJ.y % size.y, mx * sj + si);
 }
 
 ivec2 getIJ(ivec3 idx, ivec3 size) {
-    int I = idx.x + (idx.z % mx) * size.x;
-    int J = idx.y + (size.z / my - 1 - idx.z / mx) * size.y;
-    return ivec2(I, J);
+    int si = idx.z % mx;
+    int sj = idx.z / mx;
+    return ivec2(size.x * si + idx.x, (my - 1 - sj) * size.y + idx.y);
 }
 
 bool withinBounds(ivec3 v, ivec3 size) {
@@ -127,17 +124,14 @@ bool inDomain(ivec3 v, ivec3 size) {
     return texelInDomain(getIJ(v, size));
 }
 
-uint getPackedIndex(ivec3 checkPoint, ivec3 currentIdx, ivec3 size) {
+uint getPackedIndex(ivec3 C, ivec3 D, ivec3 size) {
+    ivec3 checkPoint = C + D;
     if (!inDomain(checkPoint, size)) {
-        // zero-flux: return current texel
-        ivec2 selfIJ = getIJ(currentIdx, size);
-        uvec2 selfComp = texelFetch(compressedTexelIndex, selfIJ, 0).xy;
-        // pack using bit shifting: high 16 bits = x, low 16 bits = y
-        return (selfComp.x << 16u) | selfComp.y;
+        // try opposite direction first (reflective boundary, matches source of truth)
+        checkPoint = C - D;
+        if (!inDomain(checkPoint, size)) checkPoint = C;
     }
-    ivec2 targetIJ = getIJ(checkPoint, size);
-    uvec2 compIdx = texelFetch(compressedTexelIndex, targetIJ, 0).xy;
-    // pack using bit shifting: high 16 bits = x, low 16 bits = y
+    uvec2 compIdx = texelFetch(compressedTexelIndex, getIJ(checkPoint, size), 0).xy;
     return (compIdx.x << 16u) | compIdx.y;
 }
 
@@ -160,14 +154,14 @@ void main() {
     ivec3 jj = ivec3(0, 1, 0);
     ivec3 kk = ivec3(0, 0, 1);
     
-    // pack neighbor indices
-    odir0.r = getPackedIndex(cidx + jj, cidx, size);  // NORTH
-    odir0.g = getPackedIndex(cidx - jj, cidx, size);  // SOUTH
-    odir0.b = getPackedIndex(cidx + ii, cidx, size);  // EAST
-    odir0.a = getPackedIndex(cidx - ii, cidx, size);  // WEST
-    
-    odir1.r = getPackedIndex(cidx + kk, cidx, size);  // UP
-    odir1.g = getPackedIndex(cidx - kk, cidx, size);  // DOWN
+    // pack neighbor indices (two-step reflective boundary: try +D, then -D, then self)
+    odir0.r = getPackedIndex(cidx,  jj, size);  // NORTH
+    odir0.g = getPackedIndex(cidx, -jj, size);  // SOUTH
+    odir0.b = getPackedIndex(cidx,  ii, size);  // EAST
+    odir0.a = getPackedIndex(cidx, -ii, size);  // WEST
+
+    odir1.r = getPackedIndex(cidx,  kk, size);  // UP
+    odir1.g = getPackedIndex(cidx, -kk, size);  // DOWN
     odir1.b = uint(0);
     odir1.a = uint(0);
 }`;
@@ -809,4 +803,22 @@ export function readVoltageData() {
 
 export function getCompressedDimensions() {
     return { width: compWidth, height: compHeight };
+}
+
+export function resetSimulation() {
+    if (!initialized || !fboValid) return;
+    const initData = new Float32Array(compWidth * compHeight * 4);
+    for (let i = 0; i < compWidth * compHeight; i++) {
+        initData[i * 4 + 0] = 0.0;
+        initData[i * 4 + 1] = 1.0;
+        initData[i * 4 + 2] = 1.0;
+        initData[i * 4 + 3] = 0.03;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, fcolor0);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, compWidth, compHeight, gl.RGBA, gl.FLOAT, initData);
+    gl.bindTexture(gl.TEXTURE_2D, scolor0);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, compWidth, compHeight, gl.RGBA, gl.FLOAT, initData);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    currentBuffer = 0;
+    console.log('Simulation reset to resting state');
 }

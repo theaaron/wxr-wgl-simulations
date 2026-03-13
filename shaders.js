@@ -117,22 +117,27 @@ export const SIMPLE_FS = `#version 300 es
     out vec4 fragColor;
     
     void main() {
-        if (v_shade < 0.5) discard;
+        // don't discard on v_shade — let depth test handle z-ordering.
+        // interior voxels are naturally occluded by surface voxels in front.
+
+        vec3 materialColor = (u_useVertexColor == 1) ? v_color : vec3(0.9, 0.9, 0.9);
+
+        float nLen = length(v_normal);
+        if (nLen < 0.001) {
+            // interior voxel with zero normal — render flat gray so depth test still occludes it
+            fragColor = vec4(materialColor * 0.5, 1.0);
+            return;
+        }
 
         vec3 N = normalize(v_normal);
-        vec3 E = normalize(-v_position);  // eye vector in view space
+        vec3 E = normalize(-v_position);
         
-        // transform light direction to view space so it stays fixed relative to viewer
         vec3 L = normalize(mat3(u_viewMatrix) * u_lightDirection);
         vec3 R = reflect(L, N);
         float lambertTerm = dot(N, -L);
         
-        vec3 materialColor = (u_useVertexColor == 1) ? v_color : vec3(0.9, 0.9, 0.9);
-        
-        // ambient
         vec3 Ia = u_lightAmbient * u_materialAmbient * materialColor;
         
-        // diffuse + specular
         vec3 Id = vec3(0.0);
         vec3 Is = vec3(0.0);
         if (lambertTerm > 0.0) {
@@ -142,7 +147,6 @@ export const SIMPLE_FS = `#version 300 es
         }
         
         vec3 finalColor = Ia + Id + Is;
-        
         fragColor = vec4(finalColor, 1.0);
     }
 `;
@@ -355,19 +359,17 @@ export const APPROX_FS = `#version 300 es
         
         vec3 finalColor = Ia + Id + Is;
         
-        // depth-based weight for OIT
+        // depth-based weight for OIT (McGuire/Bavoil)
         float z = v_depth;
         float weight = u_alpha * max(0.01, 3000.0 * pow(1.0 - z, 3.0));
         
-        // pre-multiply alpha for light absorption through layers
-        vec3 premultColor = finalColor * u_alpha;
+        // accumulate weighted color (additive blend: ONE, ONE)
+        accumColor = vec4(finalColor * u_alpha * weight, u_alpha * weight);
         
-        // accumulate weighted color
-        accumColor = vec4(premultColor * weight, u_alpha * weight);
-        
-        // accumulate transmittance
-        float transmittance = 1.0 - u_alpha;
-        revealage = vec4(transmittance, 0.0, 0.0, 0.0);
+        // reveal: store -log(1 - alpha) so additive sum = -log(product of transmittances)
+        // i.e. exp(-sum) recovers the correct total transmittance without multiplicative blending
+        float alpha_clamped = clamp(u_alpha, 0.0, 0.9999);
+        revealage = vec4(-log(1.0 - alpha_clamped), 0.0, 0.0, 0.0);
     }
 `;
 
@@ -392,28 +394,19 @@ export const APPROX_COMPOSITE_FS = `#version 300 es
     
     void main() {
         vec4 accum = texture(u_accumTexture, v_texCoord);
-        float sumTransmittance = texture(u_revealTexture, v_texCoord).r;
+        float negLogTransmittance = texture(u_revealTexture, v_texCoord).r;
         
-        if (accum.a < 0.001) {
-            fragColor = vec4(1.0, 1.0, 1.0, 1.0);
+        // skip pixels where no OIT fragments landed — preserve the lab background
+        if (accum.a < 0.001 && negLogTransmittance < 0.001) {
+            discard;
             return;
         }
         
-        vec3 avgColor = accum.rgb / max(accum.a, 0.00001);
+        // weighted average color across all layers
+        vec3 avgColor = accum.rgb / max(accum.a, 1e-5);
         
-        float absorption = 1.0 - exp(-accum.a * 2.5);
-        float opacity = clamp(absorption, 0.0, 1.0);
-        
-        float darkening = exp(-accum.a * 0.2);
-        vec3 darkenedColor = avgColor * darkening;
-        
-        if (accum.a > 10.0) {
-            darkenedColor = avgColor;
-        }
-        
-        vec3 finalColor = mix(vec3(1.0), darkenedColor, opacity);
-        
-        fragColor = vec4(finalColor, 1.0);
+        // force fully opaque — structure is surface-only so it should be solid
+        fragColor = vec4(avgColor, 1.0);
     }
 `;
 
@@ -450,9 +443,9 @@ export const PICKER_VS = `
 `;
 
 export const PICKER_VS_SIMPLE = `#version 300 es
-    in vec3 a_position;
-    in vec3 a_instancePosition;
-    in float a_instanceID;
+    layout(location = 0) in vec3 a_position;
+    layout(location = 1) in vec3 a_instancePosition;
+    layout(location = 2) in float a_instanceID;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
@@ -503,9 +496,9 @@ export const PICKER_FS = `#version 300 es
 // ============================================================================
 
 export const OBJ_VS = `#version 300 es
-    in vec3 a_position;
-    in vec3 a_normal;
-    in vec2 a_texCoord;
+    layout(location = 0) in vec3 a_position;
+    layout(location = 1) in vec3 a_normal;
+    layout(location = 2) in vec2 a_texCoord;
     
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_viewMatrix;
@@ -582,4 +575,119 @@ export const OBJ_FS = `#version 300 es
         vec3 finalColor = Ia + Id + Is;
         fragColor = vec4(finalColor, u_materialOpacity);
     }
+`;
+
+// ============================================================================
+// DEPTH-PEEL VOXEL SHADERS
+// Attribute-free: position/normal fetched from textures via gl_VertexID.
+// Draw with gl.drawArrays(TRIANGLES, 0, 36 * numVoxels) — no VBOs needed.
+// ============================================================================
+
+export const DEPTH_PEEL_VS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+uniform int         u_noVoxels;
+uniform float       u_voxelSize;
+uniform float       u_alpha;
+
+uniform sampler2D   u_posTex;
+uniform sampler2D   u_normalTex;
+
+uniform sampler2D   u_voltageTex;
+uniform int         u_compWidth;
+uniform bool        u_useSimTex;
+
+uniform mat4        u_projectionMatrix;
+uniform mat4        u_viewMatrix;
+uniform mat4        u_modelMatrix;
+uniform mat4        u_normalMatrix;
+
+uniform vec4        u_lightColor;
+uniform float       u_lightAmbientTerm;
+uniform float       u_lightSpecularTerm;
+uniform vec3        u_lightDirection;
+uniform vec4        u_materialColor;
+uniform float       u_materialAmbientTerm;
+uniform float       u_materialSpecularTerm;
+uniform float       u_shininess;
+
+out vec4  v_color;
+out float v_shade;
+
+vec3 jetColor(float t) {
+    t = clamp(t, 0.0, 1.0);
+    float r = clamp(1.5 - abs(4.0 * t - 3.0), 0.0, 1.0);
+    float g = clamp(1.5 - abs(4.0 * t - 2.0), 0.0, 1.0);
+    float b = clamp(1.5 - abs(4.0 * t - 1.0), 0.0, 1.0);
+    return vec3(r, g, b);
+}
+
+void main() {
+    vec3 cv[36];
+    cv[0] =vec3(0,0,1);cv[1] =vec3(1,0,1);cv[2] =vec3(0,1,1);
+    cv[3] =vec3(0,1,1);cv[4] =vec3(1,0,1);cv[5] =vec3(1,1,1);
+    cv[6] =vec3(1,1,1);cv[7] =vec3(1,0,1);cv[8] =vec3(1,1,0);
+    cv[9] =vec3(1,1,0);cv[10]=vec3(1,0,1);cv[11]=vec3(1,0,0);
+    cv[12]=vec3(1,0,0);cv[13]=vec3(1,0,1);cv[14]=vec3(0,0,0);
+    cv[15]=vec3(0,0,0);cv[16]=vec3(1,0,1);cv[17]=vec3(0,0,1);
+    cv[18]=vec3(0,0,1);cv[19]=vec3(0,1,1);cv[20]=vec3(0,0,0);
+    cv[21]=vec3(0,0,0);cv[22]=vec3(0,1,1);cv[23]=vec3(0,1,0);
+    cv[24]=vec3(0,1,0);cv[25]=vec3(0,1,1);cv[26]=vec3(1,1,1);
+    cv[27]=vec3(1,1,1);cv[28]=vec3(1,1,0);cv[29]=vec3(0,1,0);
+    cv[30]=vec3(0,1,0);cv[31]=vec3(1,1,0);cv[32]=vec3(0,0,0);
+    cv[33]=vec3(0,0,0);cv[34]=vec3(1,1,0);cv[35]=vec3(1,0,0);
+
+    int vertId  = gl_VertexID % 36;
+    int voxelId = gl_VertexID / 36;
+
+    ivec2 texSize = textureSize(u_posTex, 0);
+    ivec2 tc      = ivec2(voxelId % texSize.x, voxelId / texSize.x);
+    vec4  pos4    = texelFetch(u_posTex, tc, 0);
+    v_shade       = (pos4.a > 0.5) ? 1.0 : 0.0;
+
+    vec3 pos = (pos4.xyz - 0.5) * 2.0;
+    pos += u_voxelSize * 0.005 * 2.0 * (cv[vertId] - 0.5);
+
+    vec3 surfNormal = texelFetch(u_normalTex, tc, 0).xyz;
+    float nLen = length(surfNormal);
+    if (nLen < 0.01) v_shade = 0.0;
+
+    vec3 N = (nLen > 0.01) ? normalize(mat3(u_normalMatrix) * surfNormal) : vec3(0,1,0);
+    vec3 E = normalize(-(u_viewMatrix * u_modelMatrix * vec4(pos, 1.0)).xyz);
+    vec3 L = normalize(u_lightDirection);
+    vec3 R = reflect(L, N);
+    float lambert = dot(N, -L);
+
+    vec4 mColor = u_materialColor;
+    if (u_useSimTex && u_compWidth > 0) {
+        ivec2 simTC = ivec2(voxelId % u_compWidth, voxelId / u_compWidth);
+        float voltage = texelFetch(u_voltageTex, simTC, 0).r;
+        if (voltage > 0.05) mColor = vec4(jetColor(voltage), 1.0);
+    }
+
+    vec4 Ia = vec4(vec3(u_lightAmbientTerm * u_materialAmbientTerm), 1.0);
+    vec4 Id = vec4(0.0);
+    vec4 Is = vec4(0.0);
+    if (lambert > 0.0) {
+        Id = u_lightColor * mColor * lambert;
+        float spec = pow(max(dot(R, E), 0.0), u_shininess);
+        Is = vec4(vec3(u_lightSpecularTerm * u_materialSpecularTerm * spec), 1.0);
+    }
+
+    v_color = vec4(vec3(Ia + Id + Is), u_alpha);
+    gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(pos, 1.0);
+}
+`;
+
+export const DEPTH_PEEL_FS = `#version 300 es
+precision highp float;
+in vec4  v_color;
+in float v_shade;
+out vec4 fragColor;
+void main() {
+    if (v_shade < 0.5) discard;
+    fragColor = v_color;
+}
 `;
