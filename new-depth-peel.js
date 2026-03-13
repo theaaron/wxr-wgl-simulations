@@ -356,7 +356,8 @@ async function enterVR() {
 // ============================================================================
 const STRUCTURE_PATHS = {
     whole: './resources/whole_64x64x64.json',
-    atria: './resources/atria2.json',
+    // atria: './resources/atria2.json',
+    atria: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
     ventricle: './resources/ventricle_64x64x64.json',
 };
 
@@ -388,13 +389,14 @@ window.addEventListener('load', async () => {
             document.getElementById('scale-value').textContent = VOXEL_SIZE.toFixed(1);
         });
     }
-
+    // const LAB_URL = './resources/cath-lab.glb';
+    const LAB_URL = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
     const [structBuf, labBuf] = await Promise.all([
         fetchWithProgress('Heart structure', PATH).catch(e => {
             console.error('Failed to load structure:', e);
             return null;
         }),
-        fetchWithProgress('Lab environment', './resources/cath-lab.glb').catch(e => {
+        fetchWithProgress('Lab environment', LAB_URL).catch(e => {
             console.error('Failed to load lab model:', e);
             return null;
         }),
