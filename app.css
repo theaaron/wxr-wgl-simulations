@@ -179,3 +179,95 @@ button:disabled:hover {
     opacity: 1;
     text-decoration: underline;
 }
+
+.selector-row + button {
+    margin-top: 28px;
+}
+
+.selector {
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+    max-width: 480px;
+}
+
+.selector-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.selector-label {
+    font-size: 0.8rem;
+    opacity: 0.65;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.btn-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sel-btn {
+    padding: 8px 18px;
+    border: 1px solid rgba(179, 163, 105, 0.4);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--gt-white);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.sel-btn:hover {
+    border-color: var(--gt-gold);
+    color: var(--gt-gold);
+}
+
+.sel-btn.active {
+    background: var(--gt-gold);
+    border-color: var(--gt-gold);
+    color: var(--gt-navy);
+    font-weight: 700;
+}
+
+#combo-status {
+    margin-top: 32px;
+}
+
+.nav-group {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.nav-btn {
+    padding: 10px 20px;
+    border: 1px solid rgba(179, 163, 105, 0.5);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--gt-gold);
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.nav-btn:hover {
+    background: rgba(179, 163, 105, 0.15);
+    border-color: var(--gt-gold);
+}
+
+.nav-btn.active {
+    background: rgba(179, 163, 105, 0.25);
+    border-color: var(--gt-gold);
+}
