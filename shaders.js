@@ -604,6 +604,10 @@ uniform mat4        u_viewMatrix;
 uniform mat4        u_modelMatrix;
 uniform mat4        u_normalMatrix;
 
+uniform float       u_cutX;
+uniform float       u_cutY;
+uniform float       u_cutZ;
+
 uniform vec4        u_lightColor;
 uniform float       u_lightAmbientTerm;
 uniform float       u_lightSpecularTerm;
@@ -615,6 +619,7 @@ uniform float       u_shininess;
 
 out vec4  v_color;
 out float v_shade;
+out float v_cut;
 
 vec3 jetColor(float t) {
     t = clamp(t, 0.0, 1.0);
@@ -646,6 +651,7 @@ void main() {
     ivec2 tc      = ivec2(voxelId % texSize.x, voxelId / texSize.x);
     vec4  pos4    = texelFetch(u_posTex, tc, 0);
     v_shade       = (pos4.a > 0.5) ? 1.0 : 0.0;
+    v_cut         = (pos4.x > u_cutX || pos4.y > u_cutY || pos4.z > u_cutZ) ? 1.0 : 0.0;
 
     vec3 pos = (pos4.xyz - 0.5) * 2.0;
     pos += u_voxelSize * 0.005 * 2.0 * (cv[vertId] - 0.5);
@@ -685,9 +691,119 @@ export const DEPTH_PEEL_FS = `#version 300 es
 precision highp float;
 in vec4  v_color;
 in float v_shade;
+in float v_cut;
 out vec4 fragColor;
 void main() {
-    if (v_shade < 0.5) discard;
+    if (v_shade < 0.5 || v_cut > 0.5) discard;
     fragColor = v_color;
+}
+`;
+
+// ============================================================================
+// SURFACE VISUALIZER SHADERS
+// ============================================================================
+
+export const SURF_VS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+
+layout(location = 0) in vec2 a_indices;
+
+uniform usampler2D  u_compressedTexelIndex;
+uniform sampler2D   u_posTex;
+uniform sampler2D   u_normalTex;
+uniform sampler2D   u_voltageTex;
+uniform bool        u_useSimTex;
+
+uniform mat4  u_projectionMatrix;
+uniform mat4  u_viewMatrix;
+uniform mat4  u_modelMatrix;
+uniform mat4  u_normalMatrix;
+
+uniform float u_cutX;
+uniform float u_cutY;
+uniform float u_cutZ;
+
+out vec3  v_N;
+out vec3  v_E;
+out float v_voltage;
+out float v_useVoltage;
+out float v_cut;
+
+void main() {
+    ivec2 voxIdx = ivec2(texelFetch(u_compressedTexelIndex, ivec2(a_indices), 0).xy);
+    vec3  pos    = texelFetch(u_posTex, voxIdx, 0).xyz;
+
+    v_cut = (pos.x > u_cutX || pos.y > u_cutY || pos.z > u_cutZ) ? 1.0 : 0.0;
+
+    vec3 worldPos = (pos - 0.5) * 2.0;
+
+    vec3  rawN = texelFetch(u_normalTex, voxIdx, 0).xyz;
+    float nLen = length(rawN);
+    v_N = (nLen > 0.01) ? normalize(mat3(u_normalMatrix) * rawN) : vec3(0.0, 1.0, 0.0);
+    v_E = normalize(-(u_viewMatrix * u_modelMatrix * vec4(worldPos, 1.0)).xyz);
+
+    if (u_useSimTex) {
+        v_voltage    = texelFetch(u_voltageTex, voxIdx, 0).r;
+        v_useVoltage = 1.0;
+    } else {
+        v_voltage    = 0.0;
+        v_useVoltage = 0.0;
+    }
+
+    gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(worldPos, 1.0);
+}
+`;
+
+export const SURF_FS = `#version 300 es
+precision highp float;
+
+in vec3  v_N;
+in vec3  v_E;
+in float v_voltage;
+in float v_useVoltage;
+in float v_cut;
+
+uniform vec3  u_lightDirection;
+uniform vec4  u_lightColor;
+uniform float u_lightAmbientTerm;
+uniform float u_lightSpecularTerm;
+uniform vec4  u_materialColor;
+uniform float u_materialAmbientTerm;
+uniform float u_materialSpecularTerm;
+uniform float u_shininess;
+
+out vec4 fragColor;
+
+vec3 jetColor(float t) {
+    t = clamp(t, 0.0, 1.0);
+    float r = clamp(1.5 - abs(4.0 * t - 3.0), 0.0, 1.0);
+    float g = clamp(1.5 - abs(4.0 * t - 2.0), 0.0, 1.0);
+    float b = clamp(1.5 - abs(4.0 * t - 1.0), 0.0, 1.0);
+    return vec3(r, g, b);
+}
+
+void main() {
+    if (v_cut > 0.5) discard;
+
+    vec4 mColor = (v_useVoltage > 0.5 && v_voltage > 0.05)
+        ? vec4(jetColor(v_voltage), 1.0)
+        : u_materialColor;
+
+    vec3  L       = normalize(u_lightDirection);
+    vec3  R       = reflect(L, v_N);
+    float lambert = dot(v_N, -L);
+
+    vec4 Ia = vec4(vec3(u_lightAmbientTerm * u_materialAmbientTerm), 1.0);
+    vec4 Id = vec4(0.0);
+    vec4 Is = vec4(0.0);
+    if (lambert > 0.0) {
+        Id = u_lightColor * mColor * lambert;
+        float spec = pow(max(dot(R, v_E), 0.0), u_shininess);
+        Is = vec4(vec3(u_lightSpecularTerm * u_materialSpecularTerm * spec), 1.0);
+    }
+
+    fragColor = vec4(vec3(Ia + Id + Is), 1.0);
 }
 `;
