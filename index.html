@@ -8,24 +8,87 @@
 </head>
 <body>
     <div class="container">
-        <fieldset id="structure-select">
-            <legend>Structure</legend>
-            <label><input type="radio" name="structure" value="whole" checked> Whole</label>
-            <label><input type="radio" name="structure" value="atria"> Atria</label>
-            <label><input type="radio" name="structure" value="ventricle"> Ventricle</label>
-        </fieldset>
+        <h1>WebXR/WebGL Simulations</h1>
 
-        <button id="vr-button" disabled>Enter VR</button>
-
-        <div class="controls">
-            <label for="voxel-scale">Voxel Size: <span id="scale-value">5.0</span>x</label>
-            <input type="range" id="voxel-scale" min="0.5" max="10.0" step="0.5" value="5.0">
+        <div class="selector">
+            <div class="selector-row">
+                <span class="selector-label">Structure</span>
+                <div class="btn-group">
+                    <button class="sel-btn active" data-axis="structure" data-value="atria">Atria</button>
+                    <button class="sel-btn" data-axis="structure" data-value="ventricle">Ventricle</button>
+                </div>
+            </div>
+            <div class="selector-row">
+                <span class="selector-label">Renderer</span>
+                <div class="btn-group">
+                    <button class="sel-btn active" data-axis="renderer" data-value="surface">Surface</button>
+                    <button class="sel-btn" data-axis="renderer" data-value="voxel">Voxel</button>
+                </div>
+            </div>
+            <div class="selector-row">
+                <span class="selector-label">Model</span>
+                <div class="btn-group">
+                    <button class="sel-btn active" data-axis="model" data-value="mm">Minimal</button>
+                    <button class="sel-btn" disabled>TBD</button>
+                </div>
+            </div>
         </div>
 
-        <a href="ar-test.html" class="nav-link">AR Test</a>
+        <button id="launch-btn">Launch</button>
+        <p id="combo-status"></p>
+
+        <div class="nav-group">
+            <a href="ar-test.html" class="nav-btn">AR Test</a>
+        </div>
     </div>
-    <div id="status">Initializing…</div>
-    <script type="module" src="new-depth-peel.js"></script>
+
+    <script>
+        const ROUTES = {
+            'atria-surface-mm':    'surface-atria-mm.html',
+            'atria-voxel-mm':      'voxelizer-atia-mm.html',
+        };
+
+        const LABELS = {
+            structure: { atria: 'Atria',   ventricle: 'Ventricle' },
+            renderer:  { surface: 'Surface', voxel: 'Voxel' },
+            model:     { mm: 'Minimal Model', tp: 'Ten Tusscher', ord: 'ORd' },
+        };
+
+        const sel = { structure: 'atria', renderer: 'surface', model: 'mm' };
+
+        function key() { return `${sel.structure}-${sel.renderer}-${sel.model}`; }
+
+        function update() {
+            const url  = ROUTES[key()];
+            const btn  = document.getElementById('launch-btn');
+            const info = document.getElementById('combo-status');
+            info.textContent = [
+                LABELS.structure[sel.structure],
+                LABELS.renderer[sel.renderer],
+                LABELS.model[sel.model],
+            ].join(' · ');
+            btn.disabled    = !url;
+            btn.textContent = url ? 'Launch' : 'Not yet implemented';
+        }
+
+        document.querySelectorAll('.sel-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const { axis, value } = btn.dataset;
+                sel[axis] = value;
+                document.querySelectorAll(`.sel-btn[data-axis="${axis}"]`)
+                    .forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                update();
+            });
+        });
+
+        document.getElementById('launch-btn').addEventListener('click', () => {
+            const url = ROUTES[key()];
+            if (url) window.location.href = url;
+        });
+
+        update();
+    </script>
 </body>
 
 </html>
