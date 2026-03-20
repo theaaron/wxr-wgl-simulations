@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surface Vis — Atria MM</title>
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <div class="container">
+        <div class="selector-row">
+            <span class="selector-label">Size</span>
+            <div class="btn-group">
+                <button class="sel-btn active" data-size="small">Small</button>
+                <button class="sel-btn" data-size="large">Large</button>
+            </div>
+        </div>
+        <button id="vr-button">Enter VR</button>
+        <div class="nav-group">
+            <a href="index.html" class="nav-btn">← Menu</a>
+            <a href="ar-test.html" class="nav-btn">AR Test</a>
+        </div>
+    </div>
+    <div id="status">Initializing…</div>
+    <script>
+        document.querySelectorAll('.sel-btn[data-size]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.sel-btn[data-size]')
+                    .forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    </script>
+    <script type="module" src="visurf-atria-mm.js"></script>
+</body>
+</html>
