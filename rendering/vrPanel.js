@@ -5,7 +5,7 @@ const PANEL = {
     width: 0.36,
     height: 0.30,
     rotation: 25 * Math.PI / 180,
-    backgroundColor: [0.12, 0.12, 0.16, 0.9],
+    backgroundColor: [0.0, 0.188, 0.341, 0.92],
 };
 
 const LAYOUT = {
@@ -18,8 +18,8 @@ const BAR = {
     y: -0.46,
     width: 0.30,
     height: 0.035,
-    color: [0.45, 0.45, 0.50],
-    hoverColor: [0.65, 0.65, 0.70],
+    color: [0.0, 0.28, 0.50],
+    hoverColor: [0.0, 0.38, 0.65],
 };
 
 function generateButtons() {
@@ -43,11 +43,18 @@ function generateButtons() {
             const y = top - r * (btnH + g) - btnH / 2;
             const isStart = r === 0 && c === 0;
 
+            const isCut = r === 2;
             buttons[`btn_${r}_${c}`] = {
                 x, y, width: btnW, height: btnH,
-                color: isStart ? [0.2, 0.4, 0.8] : [0.85, 0.85, 0.85],
-                hoverColor: isStart ? [0.35, 0.55, 0.95] : [1.0, 1.0, 1.0],
-                action: isStart ? 'startSimulation' : null,
+                color: (isStart || isCut) ? [0.2, 0.4, 0.8]
+                     :                     [0.0, 0.32, 0.56],
+                hoverColor: (isStart || isCut) ? [0.35, 0.55, 0.95]
+                           :                     [0.0,  0.45, 0.75],
+                action: isStart ? 'startSimulation'
+                      : (r === 2 && c === 0) ? 'cutX'
+                      : (r === 2 && c === 1) ? 'cutY'
+                      : (r === 2 && c === 2) ? 'cutZ'
+                      : null,
             };
         }
     }
@@ -65,10 +72,15 @@ let gl = null;
 let panelProgram = null;
 let buttonProgram = null;
 let barProgram = null;
+let textProgram = null;
 let panelBuffer = null;
 let panelIndexBuffer = null;
 let buttonBuffer = null;
 let buttonIndexBuffer = null;
+
+// text label textures keyed by button id
+const buttonLabels = {};
+const buttonLabelTextures = {};
 
 let hoveredButton = null;
 let barHovered = false;
@@ -79,11 +91,7 @@ let panelGrab = {
     offset: [0, 0, 0],
 };
 
-let callbacks = {
-    startSimulation: null,
-    pauseSimulation: null,
-    resetView: null,
-};
+let callbacks = {};
 
 // ============================================================================
 // SHADERS
@@ -180,6 +188,38 @@ void main() {
 }
 `;
 
+const TEXT_VS = `#version 300 es
+layout(location = 0) in vec3 a_position;
+uniform mat4 u_projectionMatrix;
+uniform mat4 u_viewMatrix;
+uniform mat4 u_modelMatrix;
+uniform vec3 u_offset;
+uniform vec2 u_size;
+out vec2 v_uv;
+
+void main() {
+    v_uv = vec2(a_position.x + 0.5, 0.5 - a_position.y);
+    vec3 pos = a_position;
+    pos.x = pos.x * u_size.x + u_offset.x;
+    pos.y = pos.y * u_size.y + u_offset.y;
+    pos.z += u_offset.z + 0.003;
+    gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * vec4(pos, 1.0);
+}
+`;
+
+const TEXT_FS = `#version 300 es
+precision mediump float;
+uniform sampler2D u_texture;
+in vec2 v_uv;
+out vec4 fragColor;
+
+void main() {
+    vec4 c = texture(u_texture, v_uv);
+    if (c.a < 0.05) discard;
+    fragColor = c;
+}
+`;
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
@@ -188,11 +228,20 @@ export function initVRPanel(glContext) {
     gl = glContext;
 
     createQuadGeometry();
-    panelProgram = createProgram(PANEL_VS, PANEL_FS, 'Panel');
+    panelProgram  = createProgram(PANEL_VS,  PANEL_FS,  'Panel');
     buttonProgram = createProgram(BUTTON_VS, BUTTON_FS, 'Button');
-    barProgram = createProgram(BAR_VS, BAR_FS, 'Bar');
+    barProgram    = createProgram(BAR_VS,    BAR_FS,    'Bar');
+    textProgram   = createProgram(TEXT_VS,   TEXT_FS,   'Text');
 
-    if (panelProgram && buttonProgram && barProgram) {
+    buttonLabels['btn_0_0'] = 'Solve';
+    buttonLabels['btn_2_0'] = 'Cut X';
+    buttonLabels['btn_2_1'] = 'Cut Y';
+    buttonLabels['btn_2_2'] = 'Cut Z';
+    for (const [id, label] of Object.entries(buttonLabels)) {
+        buttonLabelTextures[id] = createTextTexture(label);
+    }
+
+    if (panelProgram && buttonProgram && barProgram && textProgram) {
         console.log('✅ VR Panel initialized (3×3 grid + grab bar)');
         return true;
     }
@@ -221,6 +270,28 @@ function createQuadGeometry() {
     // reuse for buttons and bar
     buttonBuffer = panelBuffer;
     buttonIndexBuffer = panelIndexBuffer;
+}
+
+function createTextTexture(text, w = 256, h = 128) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'white';
+    ctx.font = `bold ${Math.floor(h * 0.48)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, w / 2, h / 2);
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return tex;
 }
 
 function createProgram(vsSource, fsSource, name) {
@@ -256,9 +327,9 @@ function compileShader(source, type, name) {
 // ============================================================================
 
 export function setPanelCallbacks(cbs) {
-    if (cbs.startSimulation) callbacks.startSimulation = cbs.startSimulation;
-    if (cbs.pauseSimulation) callbacks.pauseSimulation = cbs.pauseSimulation;
-    if (cbs.resetView) callbacks.resetView = cbs.resetView;
+    for (const [key, fn] of Object.entries(cbs)) {
+        if (typeof fn === 'function') callbacks[key] = fn;
+    }
 }
 
 // ============================================================================
@@ -522,6 +593,27 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
         gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), isHov ? 1.0 : 0.0);
 
         gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    // text labels
+    if (textProgram) {
+        gl.useProgram(textProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_projectionMatrix'), false, projectionMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_viewMatrix'), false, viewMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_modelMatrix'), false, modelMatrix);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
+        bindQuad(textProgram);
+
+        for (const [id, tex] of Object.entries(buttonLabelTextures)) {
+            const btn = BUTTONS[id];
+            if (!btn) continue;
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [btn.x, btn.y, 0]);
+            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [btn.width * 0.85, btn.height * 0.55]);
+            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+        }
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     // grab bar (capsule / pill)
