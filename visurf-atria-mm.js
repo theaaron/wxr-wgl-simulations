@@ -374,8 +374,8 @@ async function enterVR() {
 // ============================================================================
 const ATRIA_PATHS = {
     small: './resources/atria.json',
-    large: './resources/atria2.json',
-    // large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
+    // large: './resources/atria2.json',
+    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
 };
 
 window.addEventListener('load', () => {
