@@ -805,6 +805,8 @@ export function getCompressedDimensions() {
     return { width: compWidth, height: compHeight };
 }
 
+export function getCompressedTexelIndexTexture() { return compressedTexelIndex; }
+
 export function resetSimulation() {
     if (!initialized || !fboValid) return;
     const initData = new Float32Array(compWidth * compHeight * 4);
