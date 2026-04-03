@@ -461,6 +461,11 @@ const ATRIA_PATHS = {
     large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
 };
 
+const VENTRICLE_PATHS = {
+    small: './resources/ventricle_64x64x64.json',
+    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
+};
+
 window.addEventListener('load', () => {
     const vrBtn    = document.getElementById('vr-button');
     const statusDiv = document.getElementById('status');
@@ -490,7 +495,8 @@ window.addEventListener('load', () => {
             vrBtn.textContent = 'Loading…';
 
             const sizeBtn = document.querySelector('.sel-btn[data-size].active');
-            const PATH = ATRIA_PATHS[sizeBtn?.dataset.size] ?? ATRIA_PATHS.small;
+            // const PATH = ATRIA_PATHS[sizeBtn?.dataset.size] ?? ATRIA_PATHS.small;
+            const PATH = VENTRICLE_PATHS.large
 
             try {
                 const structBuf = await fetchWithProgress('Heart structure', PATH);
