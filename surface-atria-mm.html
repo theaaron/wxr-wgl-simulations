@@ -9,6 +9,13 @@
 <body>
     <div class="container">
         <div class="selector-row">
+            <span class="selector-label">Structure</span>
+            <div class="btn-group">
+                <button class="sel-btn active" data-structure="atria">Atria</button>
+                <button class="sel-btn" data-structure="ventricle">Ventricle</button>
+            </div>
+        </div>
+        <div class="selector-row" style="margin-top: 16px;">
             <span class="selector-label">Size</span>
             <div class="btn-group">
                 <button class="sel-btn active" data-size="small">Small</button>
@@ -23,11 +30,13 @@
     </div>
     <div id="status">Initializing…</div>
     <script>
-        document.querySelectorAll('.sel-btn[data-size]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.sel-btn[data-size]')
-                    .forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
+        ['data-structure', 'data-size'].forEach(attr => {
+            document.querySelectorAll(`.sel-btn[${attr}]`).forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll(`.sel-btn[${attr}]`)
+                        .forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
             });
         });
     </script>

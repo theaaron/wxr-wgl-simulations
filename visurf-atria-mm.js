@@ -494,9 +494,11 @@ window.addEventListener('load', () => {
             vrBtn.disabled = true;
             vrBtn.textContent = 'Loading…';
 
-            const sizeBtn = document.querySelector('.sel-btn[data-size].active');
-            // const PATH = ATRIA_PATHS[sizeBtn?.dataset.size] ?? ATRIA_PATHS.small;
-            const PATH = VENTRICLE_PATHS.large
+            const sizeBtn      = document.querySelector('.sel-btn[data-size].active');
+            const structureBtn = document.querySelector('.sel-btn[data-structure].active');
+            const structType   = structureBtn?.dataset.structure ?? 'atria';
+            const PATHS        = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
+            const PATH         = PATHS[sizeBtn?.dataset.size] ?? PATHS.small;
 
             try {
                 const structBuf = await fetchWithProgress('Heart structure', PATH);
