@@ -881,14 +881,19 @@ export function setHandGrabState(hand, grabbing, matrix, origin) {
         if (grabbing && matrix && origin) {
             grabState.leftMatrixAtGrab = new Float32Array(matrix);
             grabState.leftGrabPoint = [origin.x, origin.y, origin.z];
-            if (hand === 'left') leftController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'left' };
+
+            if (!leftController?.isHand) {
+                leftController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'left' };
+            }
         }
     } else {
         grabState.rightGrabbing = grabbing;
         if (grabbing && matrix && origin) {
             grabState.rightMatrixAtGrab = new Float32Array(matrix);
             grabState.rightGrabPoint = [origin.x, origin.y, origin.z];
-            if (hand === 'right') rightController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'right' };
+            if (!rightController?.isHand) {
+                rightController = { matrix, origin, direction: { x: -matrix[8], y: -matrix[9], z: -matrix[10] }, handedness: 'right' };
+            }
         }
     }
 
@@ -898,11 +903,13 @@ export function setHandGrabState(hand, grabbing, matrix, origin) {
             rotation: new Float32Array(structureTransform.rotation),
             scale: structureTransform.scale
         };
-        const grabPt = hand === 'left' ? grabState.leftGrabPoint : grabState.rightGrabPoint;
+        const ctrl = hand === 'left' ? leftController : rightController;
+        const refPt = ctrl ? [ctrl.origin.x, ctrl.origin.y, ctrl.origin.z]
+                           : (hand === 'left' ? grabState.leftGrabPoint : grabState.rightGrabPoint);
         grabState.structureOffsetAtGrab = [
-            structureTransform.position[0] - grabPt[0],
-            structureTransform.position[1] - grabPt[1],
-            structureTransform.position[2] - grabPt[2]
+            structureTransform.position[0] - refPt[0],
+            structureTransform.position[1] - refPt[1],
+            structureTransform.position[2] - refPt[2]
         ];
         if (grabState.leftGrabbing && grabState.rightGrabbing) {
             grabState.initialHandDistance = getHandDistance();
@@ -923,7 +930,6 @@ export function updateHandControllerPose(hand, matrix) {
     else rightController = pose;
 }
 
-// matrix math helpers (column-major for WebGL)
 function multiplyMat4(a, b) {
     const out = new Float32Array(16);
     for (let col = 0; col < 4; col++) {
