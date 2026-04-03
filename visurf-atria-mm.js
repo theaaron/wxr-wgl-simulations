@@ -4,13 +4,19 @@ import {
     initVRControllers, setupControllerInput, updateControllers,
     getStructureModelMatrix, updateStructureManipulation,
     setPaceCallback, getLeftController, getRightController,
-    renderControllerRays
+    renderControllerRays, setControllerHitDistances
 } from './rendering/vrControllers.js';
 import {
-    initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover
+    initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
+    fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton
 } from './rendering/vrPanel.js';
+import {
+    updateHandTracking, getFingerRay,
+    processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching
+} from './rendering/handTracking.js';
 import { fetchWithProgress } from './loadingProgress.js';
 import { SURF_VS, SURF_FS } from './shaders.js';
+import { initHandRenderer, renderHands } from './rendering/renderHands.js';
 import {
     initCardiacSimulation, stepSimulation, paceAt,
     isSimulationWorking, getVoltageTexture, getCompressedTexelIndexTexture,
@@ -113,6 +119,10 @@ const LIGHT_DIR = [-0.19, -0.21, -0.66];
 let labModelMatrix = null;
 let simRunning = false;
 
+// bounding sphere in model space, populated after structure loads
+let surfBoundsCenter = [0, 0, 0];
+let surfBoundsRadius = 1.5;
+
 let cutX = 1.0, cutY = 1.0, cutZ = 1.0;
 const CUT_STEP = 0.1;
 function stepCut(axis) {
@@ -180,7 +190,55 @@ function buildSurfaceBuffers(struct) {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
 
+    // compute bounding sphere in model space (positions are (v/maxDim - 0.5)*2 in the shader)
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (const v of struct.voxels) {
+        const px = (v.x / maxDim - 0.5) * 2;
+        const py = (v.y / maxDim - 0.5) * 2;
+        const pz = (v.z / maxDim - 0.5) * 2;
+        if (px < minX) minX = px; if (px > maxX) maxX = px;
+        if (py < minY) minY = py; if (py > maxY) maxY = py;
+        if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz;
+    }
+    surfBoundsCenter = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+    const hr = [(maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2];
+    surfBoundsRadius = Math.sqrt(hr[0]*hr[0] + hr[1]*hr[1] + hr[2]*hr[2]);
+
     console.log(`Surface buffers: ${noNodes} vertices (${bf.noTriangles} triangles)`);
+}
+
+// ============================================================================
+// RAY-SPHERE INTERSECTION
+// ============================================================================
+function raySphereHit(origin, dir, center, radius) {
+    const lx = origin.x - center[0];
+    const ly = origin.y - center[1];
+    const lz = origin.z - center[2];
+    const b  = lx * dir.x + ly * dir.y + lz * dir.z;
+    const c  = lx*lx + ly*ly + lz*lz - radius*radius;
+    const disc = b*b - c;
+    if (disc < 0) return null;
+    const t = -b - Math.sqrt(disc);
+    return t > 0.001 ? t : null;
+}
+
+function updateSurfaceHitDistances(modelMatrix) {
+    // transform bounding sphere center to world space
+    const [bx, by, bz] = surfBoundsCenter;
+    const wx = modelMatrix[0]*bx + modelMatrix[4]*by + modelMatrix[8]*bz + modelMatrix[12];
+    const wy = modelMatrix[1]*bx + modelMatrix[5]*by + modelMatrix[9]*bz + modelMatrix[13];
+    const wz = modelMatrix[2]*bx + modelMatrix[6]*by + modelMatrix[10]*bz + modelMatrix[14];
+    // scale factor = magnitude of first column
+    const scale = Math.sqrt(modelMatrix[0]**2 + modelMatrix[1]**2 + modelMatrix[2]**2);
+    const worldCenter = [wx, wy, wz];
+    const worldRadius = surfBoundsRadius * scale;
+
+    const L = getLeftController();
+    const R = getRightController();
+    const leftDist  = (L && !L.isHand) ? raySphereHit(L.origin, L.direction, worldCenter, worldRadius) : null;
+    const rightDist = (R && !R.isHand) ? raySphereHit(R.origin, R.direction, worldCenter, worldRadius) : null;
+    setControllerHitDistances(leftDist, rightDist);
 }
 
 function mkF32Tex(w, h, data) {
@@ -263,6 +321,7 @@ function initGL() {
     if (!surfProg) return false;
     initVRControllers(gl);
     initVRPanel(gl);
+    initHandRenderer(gl);
     return true;
 }
 
@@ -285,7 +344,31 @@ function onXRFrame(time, frame) {
     if (!xrSession) return;
     xrSession.requestAnimationFrame(onXRFrame);
     updateControllers(frame, xrReferenceSpace);
-    updateStructureManipulation();
+    updateHandTracking(frame, xrReferenceSpace);
+
+    const leftCtrl  = getLeftController();
+    const rightCtrl = getRightController();
+
+    updatePanelHover(leftCtrl, rightCtrl);
+    updatePanelGrab(
+        leftCtrl, rightCtrl,
+        false, false,
+        isHandPinching('left'), isHandPinching('right')
+    );
+
+    if (!isPanelGrabbed()) updateStructureManipulation();
+
+    // finger poke panel buttons
+    for (const hand of ['left', 'right']) {
+        const fingerRay = getFingerRay(hand);
+        if (fingerRay) {
+            const buttonId = fingerPokePanel(fingerRay.origin);
+            processFingerPanelPoke(hand, buttonId);
+            if (consumeFingerPanelPoke(hand) && buttonId) {
+                triggerPanelButton(buttonId);
+            }
+        }
+    }
 
     if (simRunning) stepSimulation(getStepsPerFrame());
 
@@ -297,8 +380,7 @@ function onXRFrame(time, frame) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const modelMatrix = getStructureModelMatrix();
-
-    updatePanelHover(getLeftController(), getRightController());
+    if (structure) updateSurfaceHitDistances(modelMatrix);
 
     for (const view of pose.views) {
         const vp = glLayer.getViewport(view);
@@ -314,6 +396,7 @@ function onXRFrame(time, frame) {
         }
         renderVRPanel(view.projectionMatrix, view.transform.inverse.matrix);
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
+        renderHands(gl, frame, xrReferenceSpace, view.projectionMatrix, view.transform.inverse.matrix);
     }
     gl.disable(gl.SCISSOR_TEST);
 }

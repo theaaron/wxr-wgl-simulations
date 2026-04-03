@@ -1094,3 +1094,8 @@ export function getLastRightPick() {
 export function isControllerSqueezing(hand) {
     return hand === 'left' ? grabState.leftGrabbing : grabState.rightGrabbing;
 }
+
+export function setControllerHitDistances(leftDist, rightDist) {
+    leftHitDistance  = leftDist;
+    rightHitDistance = rightDist;
+}
