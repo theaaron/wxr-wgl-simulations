@@ -12,42 +12,32 @@ let fullWidth = 0;
 let fullHeight = 0;
 let mx = 0, my = 0;
 
-// ping-pong state textures (RGBA: U, V, W, D)
-let fcolor0 = null;  // front buffer
-let scolor0 = null;  // back buffer
-let currentBuffer = 0;  // 0 = read from fcolor0, write to scolor0
+let fcolor0 = null;
+let scolor0 = null;
+let currentBuffer = 0;
 
-// direction textures for neighbor lookup
-let dir0 = null;  // NORTH, SOUTH, EAST, WEST (packed uint32)
-let dir1 = null;  // UP, DOWN (packed uint32)
+let dir0 = null;
+let dir1 = null;
 
-// texel index textures
 let fullTexelIndex = null;
-let compressedTexelIndex = null;
 
-// FBOs for compute
 let fbo0 = null;
 let fbo1 = null;
 
-// compute programs
-let directionatorProgram = null;
 let timeStepProgram = null;
-let paceProgram = null;
+let exciteProgram = null;
 let copyProgram = null;
 
-// fullscreen quad for compute passes
 let quadVAO = null;
 let quadBuffer = null;
 
-// simulation parameters (Minimal Model)
 const params = {
-    dt: 0.1,            // time step (ms) - matching original Abubu
-    diffCoef: 0.001337, // diffusion coefficient (Patient 1-Alt value)
-    lx: 8.0,            // domain size (cm) — overwritten at init: 0.0625 * resolution
-    C_m: 1.0,           // membrane capacitance
+    dt: 0.1,
+    diffCoef: 0.001337,
+    lx: 8.0,
+    C_m: 1.0,
     
-    // Patient 1-Alt model parameters (from original Abubu)
-    u_na: 0.23,         // fixed threshold
+    u_na: 0.23,
     u_c: 0.2171,
     u_v: 0.1142,
     u_w: 0.2508,
@@ -73,11 +63,9 @@ const params = {
     t_sp: 1.484,
 };
 
-// running state
 let running = false;
-let stepsPerFrame = 20;  // matching original: skip=10 with 2 passes per iteration
+let stepsPerFrame = 20;
 
-// shader sources
 const quadVS = `#version 300 es
 layout(location = 0) in vec2 a_position;
 out vec2 cc;
@@ -86,85 +74,6 @@ void main() {
     gl_Position = vec4(a_position, 0.0, 1.0);
 }`;
 
-const directionatorFS = `#version 300 es
-precision highp float;
-precision highp int;
-precision highp usampler2D;
-
-in vec2 cc;
-uniform usampler2D fullTexelIndex;
-uniform usampler2D compressedTexelIndex;
-uniform int mx, my;
-
-layout(location = 0) out uvec4 odir0;
-layout(location = 1) out uvec4 odir1;
-
-ivec3 getIdx(ivec2 IJ, ivec3 size) {
-    int si = IJ.x / size.x;
-    int sj = (my - 1) - (IJ.y / size.y);
-    return ivec3(IJ.x % size.x, IJ.y % size.y, mx * sj + si);
-}
-
-ivec2 getIJ(ivec3 idx, ivec3 size) {
-    int si = idx.z % mx;
-    int sj = idx.z / mx;
-    return ivec2(size.x * si + idx.x, (my - 1 - sj) * size.y + idx.y);
-}
-
-bool withinBounds(ivec3 v, ivec3 size) {
-    return all(greaterThanEqual(v, ivec3(0))) && all(lessThan(v, size));
-}
-
-bool texelInDomain(ivec2 ij) {
-    return texelFetch(compressedTexelIndex, ij, 0).a == uint(1);
-}
-
-bool inDomain(ivec3 v, ivec3 size) {
-    if (!withinBounds(v, size)) return false;
-    return texelInDomain(getIJ(v, size));
-}
-
-uint getPackedIndex(ivec3 C, ivec3 D, ivec3 size) {
-    ivec3 checkPoint = C + D;
-    if (!inDomain(checkPoint, size)) {
-        // try opposite direction first (reflective boundary, matches source of truth)
-        checkPoint = C - D;
-        if (!inDomain(checkPoint, size)) checkPoint = C;
-    }
-    uvec2 compIdx = texelFetch(compressedTexelIndex, getIJ(checkPoint, size), 0).xy;
-    return (compIdx.x << 16u) | compIdx.y;
-}
-
-void main() {
-    ivec2 compSize = textureSize(fullTexelIndex, 0);
-    ivec2 fullSize = textureSize(compressedTexelIndex, 0);
-    ivec3 size = ivec3(fullSize.x / mx, fullSize.y / my, mx * my);
-    
-    ivec2 texelPos = ivec2(cc * vec2(compSize));
-    uvec4 fullIdx = texelFetch(fullTexelIndex, texelPos, 0);
-    
-    if (fullIdx.a != uint(1)) {
-        odir0 = uvec4(0u);
-        odir1 = uvec4(0u);
-        return;
-    }
-    
-    ivec3 cidx = getIdx(ivec2(fullIdx.xy), size);
-    ivec3 ii = ivec3(1, 0, 0);
-    ivec3 jj = ivec3(0, 1, 0);
-    ivec3 kk = ivec3(0, 0, 1);
-    
-    // pack neighbor indices (two-step reflective boundary: try +D, then -D, then self)
-    odir0.r = getPackedIndex(cidx,  jj, size);  // NORTH
-    odir0.g = getPackedIndex(cidx, -jj, size);  // SOUTH
-    odir0.b = getPackedIndex(cidx,  ii, size);  // EAST
-    odir0.a = getPackedIndex(cidx, -ii, size);  // WEST
-
-    odir1.r = getPackedIndex(cidx,  kk, size);  // UP
-    odir1.g = getPackedIndex(cidx, -kk, size);  // DOWN
-    odir1.b = uint(0);
-    odir1.a = uint(0);
-}`;
 
 const timeStepFS = `#version 300 es
 precision highp float;
@@ -184,7 +93,6 @@ uniform float lx;
 uniform float C_m;
 uniform int resolution;
 
-// model parameters
 uniform float u_na, u_v, u_w, u_d, u_c, u_m, u_0, u_so;
 uniform float x_tso, x_k, u_csi;
 uniform float t_d, t_soa, t_sob, t_o, t_si;
@@ -207,7 +115,6 @@ layout(location = 0) out vec4 ocolor0;
 #define DOWN  dir1.g
 
 ivec2 unpack(uint packed) {
-    // Original Abubu format: high 16 bits = x, low 16 bits = y
     return ivec2(int(packed >> 16u), int(packed & 65535u));
 }
 
@@ -224,21 +131,17 @@ void main() {
     
     vec4 color0 = texelFetch(icolor0, texelPos, 0);
     
-    // fetch direction channels
     uvec4 dir0 = texelFetch(idir0, texelPos, 0);
     uvec4 dir1 = texelFetch(idir1, texelPos, 0);
     
-    // step functions
     float H_u_na = (U > u_na) ? 1.0 : 0.0;
     float H_u_v  = (U > u_v)  ? 1.0 : 0.0;
     float H_u_w  = (U > u_w)  ? 1.0 : 0.0;
     float H_u_d  = (U > u_d)  ? 1.0 : 0.0;
     float H_u_c  = (U > u_c)  ? 1.0 : 0.0;
     
-    // I_fi (fast inward current)
     float I_fi = -V * (U - u_na) * (u_m - U) * H_u_na / t_d;
     
-    // I_so (slow outward current)
     float t_so = t_soa + 0.5 * (t_sob - t_soa) * (1.0 + Tanh((U - u_so) * x_tso));
     float I_so = (U - u_0) * (1.0 - H_u_c) / t_o + H_u_c / t_so;
     
@@ -288,7 +191,7 @@ void main() {
     ocolor0 = vec4(U, V, W, D);
 }`;
 
-const paceFS = `#version 300 es
+const exciteFS = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
@@ -297,8 +200,8 @@ in vec2 cc;
 
 uniform sampler2D icolor0;
 uniform usampler2D fullTexelIndex;
-uniform ivec3 paceCenter;
-uniform float paceRadius;
+uniform ivec3 exciteCenter;
+uniform float exciteRadius;
 uniform int mx, my;
 uniform int fullWidth, fullHeight;
 
@@ -338,9 +241,9 @@ void main() {
     // Z coordinate from block position (blockY is flipped)
     int z = blockX + (my - 1 - blockY) * mx;
     
-    float dist = length(vec3(x - paceCenter.x, y - paceCenter.y, z - paceCenter.z));
+    float dist = length(vec3(x - exciteCenter.x, y - exciteCenter.y, z - exciteCenter.z));
     
-    if (dist < paceRadius) {
+    if (dist < exciteRadius) {
         color0.r = 1.0;  // set U = 1.0 (depolarized)
     }
     
@@ -370,26 +273,20 @@ export function initCardiacSimulation(glContext, structure) {
     mx = meta.mx;
     my = meta.my;
 
-    // dx = lx / resolution must equal 0.0625 cm for correct wave speed
     params.lx = 0.0625 * (fullWidth / mx);
     
     console.log(`Initializing cardiac simulation (resolution=${fullWidth/mx}, lx=${params.lx})`);
     
-    // create fullscreen quad
     createQuad();
     
-    // create textures
     createTextures(structure.raw);
     
-    // compile shaders
     compilePrograms();
     
-    // run directionator once
-    runDirectionator();
+    runDirectionatorCPU(structure.raw);
     
     initialized = true;
     console.log('Cardiac simulation initialized');
-    
     return true;
 }
 
@@ -412,29 +309,22 @@ function createQuad() {
     gl.bindVertexArray(null);
 }
 
+let compressedDataCPU = null;
+
 function createTextures(rawData) {
-    // state textures (RGBA float32)
     fcolor0 = createFloat32Texture(compWidth, compHeight);
     scolor0 = createFloat32Texture(compWidth, compHeight);
     
-    // direction textures (RGBA uint32)
     dir0 = createUint32Texture(compWidth, compHeight);
     dir1 = createUint32Texture(compWidth, compHeight);
     
-    // texel index textures from raw data
     fullTexelIndex = createUint32TextureWithData(
-        compWidth, compHeight, 
+        compWidth, compHeight,
         new Uint32Array(rawData.fullTexelIndex)
     );
     
-    // build compressed texel index
-    const compressedData = buildCompressedTexelIndex(rawData);
-    compressedTexelIndex = createUint32TextureWithData(
-        fullWidth, fullHeight,
-        compressedData
-    );
+    compressedDataCPU = buildCompressedTexelIndexCPU(rawData);
     
-    // initialize state: U=0, V=1, W=1, D=0.03
     const initData = new Float32Array(compWidth * compHeight * 4);
     for (let i = 0; i < compWidth * compHeight; i++) {
         initData[i * 4 + 0] = 0.0;   // U
@@ -448,38 +338,113 @@ function createTextures(rawData) {
     gl.bindTexture(gl.TEXTURE_2D, scolor0);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, compWidth, compHeight, gl.RGBA, gl.FLOAT, initData);
     
-    // create FBOs
     fbo0 = createFBO(scolor0);
     fbo1 = createFBO(fcolor0);
     
 }
 
-function buildCompressedTexelIndex(rawData) {
+function buildCompressedTexelIndexCPU(rawData) {
     const data = new Uint32Array(fullWidth * fullHeight * 4);
     const indices = rawData.fullTexelIndex;
-    
-    // fullTexelIndex format: [texX, texY, inDomain, valid] repeated
     for (let i = 0; i < indices.length; i += 4) {
-        const texX = indices[i];
-        const texY = indices[i + 1];
-        const inDomain = indices[i + 2];
+        const texX  = indices[i];
+        const texY  = indices[i + 1];
         const valid = indices[i + 3];
-        
         if (valid === 1) {
             const fullIdx = texY * fullWidth + texX;
             const compIdx = i / 4;
-            const compX = compIdx % compWidth;
-            const compY = Math.floor(compIdx / compWidth);
-            
-            // store compressed coords at full position
-            data[fullIdx * 4 + 0] = compX;
-            data[fullIdx * 4 + 1] = compY;
-            data[fullIdx * 4 + 2] = 1;  // in domain
-            data[fullIdx * 4 + 3] = 1;  // valid
+            data[fullIdx * 4 + 0] = compIdx % compWidth;
+            data[fullIdx * 4 + 1] = Math.floor(compIdx / compWidth);
+            data[fullIdx * 4 + 2] = 1;
+            data[fullIdx * 4 + 3] = 1;
         }
     }
-    
     return data;
+}
+
+export function getCompressedCoord(texX, texY) {
+    if (!compressedDataCPU) return null;
+    const i = (texY * fullWidth + texX) * 4;
+    if (compressedDataCPU[i + 3] !== 1) return null;
+    return [compressedDataCPU[i], compressedDataCPU[i + 1]];
+}
+
+function runDirectionatorCPU(rawData) {
+    const nx = fullWidth / mx;
+    const ny = fullHeight / my;
+    const nz = mx * my;
+    const indices = rawData.fullTexelIndex;
+
+    const dir0Data = new Uint32Array(compWidth * compHeight * 4);
+    const dir1Data = new Uint32Array(compWidth * compHeight * 4);
+
+    function getIJ(x, y, z) {
+        const si = z % mx;
+        const sj = Math.floor(z / mx);
+        return [nx * si + x, (my - 1 - sj) * ny + y];
+    }
+
+    function isInBounds(x, y, z) {
+        return x >= 0 && x < nx && y >= 0 && y < ny && z >= 0 && z < nz;
+    }
+
+    function isInDomain(x, y, z) {
+        if (!isInBounds(x, y, z)) return false;
+        const [tx, ty] = getIJ(x, y, z);
+        const i = (ty * fullWidth + tx) * 4;
+        return compressedDataCPU[i + 3] === 1;
+    }
+
+    function getPackedIndex(cx, cy, cz, dx, dy, dz) {
+        let nx_ = cx + dx, ny_ = cy + dy, nz_ = cz + dz;
+        if (!isInDomain(nx_, ny_, nz_)) {
+            nx_ = cx - dx; ny_ = cy - dy; nz_ = cz - dz;
+            if (!isInDomain(nx_, ny_, nz_)) { nx_ = cx; ny_ = cy; nz_ = cz; }
+        }
+        const [tx, ty] = getIJ(nx_, ny_, nz_);
+        const i = (ty * fullWidth + tx) * 4;
+        const compX = compressedDataCPU[i];
+        const compY = compressedDataCPU[i + 1];
+        return (compX << 16) | compY;
+    }
+
+    for (let k = 0; k < compWidth * compHeight; k++) {
+        const ii = k * 4;
+        const texX  = indices[ii];
+        const texY  = indices[ii + 1];
+        const valid = indices[ii + 3];
+        if (valid !== 1) continue;
+
+        const si = Math.floor(texX / nx);
+        const sj = Math.floor(texY / ny);
+        const x  = texX % nx;
+        const y  = texY % ny;
+        const z  = si + (my - 1 - sj) * mx;
+
+        const NORTH = getPackedIndex(x, y, z,  0,  1,  0);
+        const SOUTH = getPackedIndex(x, y, z,  0, -1,  0);
+        const EAST  = getPackedIndex(x, y, z,  1,  0,  0);
+        const WEST  = getPackedIndex(x, y, z, -1,  0,  0);
+        const UP    = getPackedIndex(x, y, z,  0,  0,  1);
+        const DOWN  = getPackedIndex(x, y, z,  0,  0, -1);
+
+        dir0Data[ii]     = NORTH;
+        dir0Data[ii + 1] = SOUTH;
+        dir0Data[ii + 2] = EAST;
+        dir0Data[ii + 3] = WEST;
+        dir1Data[ii]     = UP;
+        dir1Data[ii + 1] = DOWN;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, dir0);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, compWidth, compHeight,
+        gl.RGBA_INTEGER, gl.UNSIGNED_INT, dir0Data);
+    gl.bindTexture(gl.TEXTURE_2D, dir1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, compWidth, compHeight,
+        gl.RGBA_INTEGER, gl.UNSIGNED_INT, dir1Data);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    console.log('Cardiac directionator computed CPU-side');
 }
 
 function createFloat32Texture(width, height) {
@@ -569,12 +534,11 @@ function createProgram(vsSource, fsSource) {
 }
 
 function compilePrograms() {
-    directionatorProgram = createProgram(quadVS, directionatorFS);
     timeStepProgram = createProgram(quadVS, timeStepFS);
-    paceProgram = createProgram(quadVS, paceFS);
+    exciteProgram = createProgram(quadVS, exciteFS);
     copyProgram = createProgram(quadVS, copyFS);
     
-    if (!directionatorProgram || !timeStepProgram || !paceProgram || !copyProgram) {
+    if (!timeStepProgram || !exciteProgram || !copyProgram) {
         console.error('Failed to compile cardiac simulation shaders');
         return false;
     }
@@ -582,48 +546,15 @@ function compilePrograms() {
     return true;
 }
 
-function runDirectionator() {
-    // create FBO for direction textures (MRT)
-    const dirFBO = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, dirFBO);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dir0, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, dir1, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    
-    gl.viewport(0, 0, compWidth, compHeight);
-    gl.useProgram(directionatorProgram);
-    
-    // bind textures
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, fullTexelIndex);
-    gl.uniform1i(gl.getUniformLocation(directionatorProgram, 'fullTexelIndex'), 0);
-    
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, compressedTexelIndex);
-    gl.uniform1i(gl.getUniformLocation(directionatorProgram, 'compressedTexelIndex'), 1);
-    
-    gl.uniform1i(gl.getUniformLocation(directionatorProgram, 'mx'), mx);
-    gl.uniform1i(gl.getUniformLocation(directionatorProgram, 'my'), my);
-    
-    // draw
-    gl.bindVertexArray(quadVAO);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.bindVertexArray(null);
-    
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.deleteFramebuffer(dirFBO);
-}
-
 function runTimeStep() {
     const readTex = currentBuffer === 0 ? fcolor0 : scolor0;
     const writeFBO = currentBuffer === 0 ? fbo0 : fbo1;
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
-    gl.disable(gl.BLEND);  // CRITICAL: disable blending for compute shaders
+    gl.disable(gl.BLEND);
     gl.viewport(0, 0, compWidth, compHeight);
     gl.useProgram(timeStepProgram);
     
-    // bind textures
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, readTex);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'icolor0'), 0);
@@ -637,14 +568,12 @@ function runTimeStep() {
     gl.bindTexture(gl.TEXTURE_2D, dir1);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'idir1'), 2);
     
-    // uniforms
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'dt'), params.dt);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'diffCoef'), params.diffCoef);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'lx'), params.lx);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'C_m'), params.C_m);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'resolution'), fullWidth / mx);
     
-    // model parameters
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_na'), params.u_na);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_v'), params.u_v);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_w'), params.u_w);
@@ -681,63 +610,49 @@ function runTimeStep() {
 }
 
 let stepCount = 0;
+
 export function stepSimulation(numSteps = 1) {
-    if (!initialized || !fboValid) {
-        return;
-    }
-    
+    if (!initialized || !fboValid) return;
     for (let i = 0; i < numSteps; i++) {
         runTimeStep();
         stepCount++;
     }
-    
-    
-    // reset GL state after compute
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindVertexArray(null);
 }
 
-export function paceAt(x, y, z, radius = 5) {
+export function exciteAt(x, y, z, radius = 5) {
     if (!initialized || !fboValid) return;
     
     const readTex = currentBuffer === 0 ? fcolor0 : scolor0;
     const writeFBO = currentBuffer === 0 ? fbo0 : fbo1;
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
-    
-    // CRITICAL: disable blending for compute shaders!
     gl.disable(gl.BLEND);
     
-    // verify FBO is complete
     const fboStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (fboStatus !== gl.FRAMEBUFFER_COMPLETE) {
-        console.error('Pacing FBO not complete:', fboStatus);
+        console.error('Excite FBO not complete:', fboStatus);
         return;
     }
     
     gl.viewport(0, 0, compWidth, compHeight);
-    gl.useProgram(paceProgram);
-    
-    // verify program is valid
-    if (!gl.isProgram(paceProgram)) {
-        console.error('paceProgram is not a valid program!');
-        return;
-    }
+    gl.useProgram(exciteProgram);
     
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, readTex);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'icolor0'), 0);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'icolor0'), 0);
     
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, fullTexelIndex);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'fullTexelIndex'), 1);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullTexelIndex'), 1);
     
-    gl.uniform3i(gl.getUniformLocation(paceProgram, 'paceCenter'), x, y, z);
-    gl.uniform1f(gl.getUniformLocation(paceProgram, 'paceRadius'), radius);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'mx'), mx);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'my'), my);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'fullWidth'), fullWidth);
-    gl.uniform1i(gl.getUniformLocation(paceProgram, 'fullHeight'), fullHeight);
+    gl.uniform3i(gl.getUniformLocation(exciteProgram, 'exciteCenter'), x, y, z);
+    gl.uniform1f(gl.getUniformLocation(exciteProgram, 'exciteRadius'), radius);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'mx'), mx);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'my'), my);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullWidth'), fullWidth);
+    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullHeight'), fullHeight);
     
     gl.bindVertexArray(quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -746,7 +661,7 @@ export function paceAt(x, y, z, radius = 5) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     currentBuffer = 1 - currentBuffer;
     
-    console.log(`Paced at (${x}, ${y}, ${z}) with radius ${radius}`);
+    console.log(`Excited at (${x}, ${y}, ${z}) with radius ${radius}`);
 }
 
 export function getVoltageTexture() {
@@ -804,8 +719,6 @@ export function readVoltageData() {
 export function getCompressedDimensions() {
     return { width: compWidth, height: compHeight };
 }
-
-export function getCompressedTexelIndexTexture() { return compressedTexelIndex; }
 
 export function resetSimulation() {
     if (!initialized || !fboValid) return;

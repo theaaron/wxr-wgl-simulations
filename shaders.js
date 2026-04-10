@@ -706,11 +706,10 @@ void main() {
 export const SURF_VS = `#version 300 es
 precision highp float;
 precision highp int;
-precision highp usampler2D;
 
 layout(location = 0) in vec2 a_indices;
+layout(location = 1) in vec2 a_compIdx;
 
-uniform usampler2D  u_compressedTexelIndex;
 uniform sampler2D   u_posTex;
 uniform sampler2D   u_normalTex;
 uniform sampler2D   u_voltageTex;
@@ -732,7 +731,7 @@ out float v_useVoltage;
 out float v_cut;
 
 void main() {
-    ivec2 voxIdx = ivec2(texelFetch(u_compressedTexelIndex, ivec2(a_indices), 0).xy);
+    ivec2 voxIdx = ivec2(a_compIdx);
     vec3  pos    = texelFetch(u_posTex, voxIdx, 0).xyz;
 
     v_cut = (pos.x > u_cutX || pos.y > u_cutY || pos.z > u_cutZ) ? 1.0 : 0.0;

@@ -41,16 +41,21 @@ function generateButtons() {
         for (let c = 0; c < cols; c++) {
             const x = left + c * (btnW + g) + btnW / 2;
             const y = top - r * (btnH + g) - btnH / 2;
-            const isStart = r === 0 && c === 0;
-
-            const isCut = r === 2;
+            const isStart  = r === 0 && c === 0;
+            const isExcite = r === 0 && c === 1;
+            const isCut    = r === 2;
             buttons[`btn_${r}_${c}`] = {
                 x, y, width: btnW, height: btnH,
                 color: (isStart || isCut) ? [0.2, 0.4, 0.8]
+                     : isExcite           ? [0.0, 0.32, 0.56]
                      :                     [0.0, 0.32, 0.56],
                 hoverColor: (isStart || isCut) ? [0.35, 0.55, 0.95]
+                           : isExcite           ? [0.0,  0.45, 0.75]
                            :                     [0.0,  0.45, 0.75],
-                action: isStart ? 'startSimulation'
+                baseColor: [0.0, 0.32, 0.56],
+                activeColor: [0.7, 0.35, 0.0],
+                action: isStart  ? 'startSimulation'
+                      : isExcite ? 'toggleExcitationMode'
                       : (r === 2 && c === 0) ? 'cutX'
                       : (r === 2 && c === 1) ? 'cutY'
                       : (r === 2 && c === 2) ? 'cutZ'
@@ -234,6 +239,7 @@ export function initVRPanel(glContext) {
     textProgram   = createProgram(TEXT_VS,   TEXT_FS,   'Text');
 
     buttonLabels['btn_0_0'] = 'Solve';
+    buttonLabels['btn_0_1'] = 'Excite';
     buttonLabels['btn_2_0'] = 'Cut X';
     buttonLabels['btn_2_1'] = 'Cut Y';
     buttonLabels['btn_2_2'] = 'Cut Z';
@@ -330,6 +336,17 @@ export function setPanelCallbacks(cbs) {
     for (const [key, fn] of Object.entries(cbs)) {
         if (typeof fn === 'function') callbacks[key] = fn;
     }
+}
+
+export function setButtonActive(buttonId, active) {
+    const btn = BUTTONS[buttonId];
+    if (!btn) return;
+    btn.color = active
+        ? (btn.activeColor ?? [0.7, 0.35, 0.0])
+        : (btn.baseColor   ?? [0.0, 0.32, 0.56]);
+    btn.hoverColor = active
+        ? [0.85, 0.50, 0.1]
+        : [0.0,  0.45, 0.75];
 }
 
 // ============================================================================

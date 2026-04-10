@@ -3,23 +3,25 @@ import { loadLabModel, renderLab, isLabLoaded } from './rendering/renderLab.js';
 import {
     initVRControllers, setupControllerInput, updateControllers,
     getStructureModelMatrix, updateStructureManipulation,
-    setPaceCallback, getLeftController, getRightController,
-    renderControllerRays, setControllerHitDistances
+    setExciteCallback, getLeftController, getRightController,
+    renderControllerRays, setControllerHitDistances, isTriggerHeld
 } from './rendering/vrControllers.js';
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
-    fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton
+    fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton,
+    setButtonActive
 } from './rendering/vrPanel.js';
 import {
     updateHandTracking, getFingerRay,
-    processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching
+    processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching,
+    setGrabCondition
 } from './rendering/handTracking.js';
 import { fetchWithProgress } from './loadingProgress.js';
 import { SURF_VS, SURF_FS } from './shaders.js';
 import { initHandRenderer, renderHands } from './rendering/renderHands.js';
 import {
-    initCardiacSimulation, stepSimulation, paceAt,
-    isSimulationWorking, getVoltageTexture, getCompressedTexelIndexTexture,
+    initCardiacSimulation, stepSimulation, exciteAt,
+    isSimulationWorking, getVoltageTexture, getCompressedCoord,
     getCompressedDimensions, getStepsPerFrame, resetSimulation
 } from './simulation/cardiacCompute.js';
 
@@ -119,9 +121,14 @@ const LIGHT_DIR = [-0.19, -0.21, -0.66];
 let labModelMatrix = null;
 let simRunning = false;
 
-// bounding sphere in model space, populated after structure loads
 let surfBoundsCenter = [0, 0, 0];
 let surfBoundsRadius = 1.5;
+let surfMaxDim = 64;
+// matches original clickRadius=0.05 in normalized (v/maxDim) coordinates space
+let exciteRadius = Math.round(0.05 * surfMaxDim);
+
+let domainSet = null;
+let domainNx = 0, domainNy = 0, domainNz = 0;
 
 let cutX = 1.0, cutY = 1.0, cutZ = 1.0;
 const CUT_STEP = 0.1;
@@ -129,6 +136,16 @@ function stepCut(axis) {
     if (axis === 'x') cutX = cutX <= CUT_STEP + 0.001 ? 1.0 : cutX - CUT_STEP;
     else if (axis === 'y') cutY = cutY <= CUT_STEP + 0.001 ? 1.0 : cutY - CUT_STEP;
     else if (axis === 'z') cutZ = cutZ <= CUT_STEP + 0.001 ? 1.0 : cutZ - CUT_STEP;
+}
+
+let excitationMode = false;
+
+let baseGrabCondition = null;
+
+function setExcitationMode(active) {
+    excitationMode = active;
+    setButtonActive('btn_0_1', active);
+    setGrabCondition(active ? () => false : baseGrabCondition);
 }
 
 // ============================================================================
@@ -164,8 +181,15 @@ function buildSurfaceBuffers(struct) {
     const { compWidth: cw, compHeight: ch } = struct.metadata;
     const { nx, ny, nz } = struct.dimensions;
     const maxDim = Math.max(nx, ny, nz);
+    surfMaxDim = maxDim;
+    exciteRadius = Math.max(2, Math.round(0.05 * maxDim));
 
-    // position texture: (vox.x/maxDim, vox.y/maxDim, voz.z/maxDim, 1.0)
+    domainNx = nx; domainNy = ny; domainNz = nz;
+    domainSet = new Uint8Array(nx * ny * nz);
+    for (const v of struct.voxels) {
+        domainSet[v.z * nx * ny + v.y * nx + v.x] = 1;
+    }
+
     const posData = new Float32Array(cw * ch * 4);
     for (let i = 0; i < struct.voxels.length; i++) {
         const v = struct.voxels[i];
@@ -183,11 +207,30 @@ function buildSurfaceBuffers(struct) {
     noNodes = bf.noNodes;
     surfVAO = gl.createVertexArray();
     gl.bindVertexArray(surfVAO);
+
+    // a_indices (location 0): full-atlas (texX, texY) per vertex
     const vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bf.indices), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // a_compIdx (location 1): precomputed compressed (compX, compY) per vertex
+    const rawIndices = bf.indices;
+    const compIdxData = new Float32Array(noNodes * 2);
+    for (let i = 0; i < noNodes; i++) {
+        const texX = rawIndices[i * 2];
+        const texY = rawIndices[i * 2 + 1];
+        const c = getCompressedCoord(texX, texY);
+        compIdxData[i * 2]     = c ? c[0] : 0;
+        compIdxData[i * 2 + 1] = c ? c[1] : 0;
+    }
+    const compIdxVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, compIdxVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, compIdxData, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
     gl.bindVertexArray(null);
 
     // compute bounding sphere in model space (positions are (v/maxDim - 0.5)*2 in the shader)
@@ -223,22 +266,79 @@ function raySphereHit(origin, dir, center, radius) {
     return t > 0.001 ? t : null;
 }
 
-function updateSurfaceHitDistances(modelMatrix) {
-    // transform bounding sphere center to world space
+function worldToVoxel(wx, wy, wz, modelMatrix) {
+    const m = modelMatrix;
+    const s2 = m[0]*m[0] + m[1]*m[1] + m[2]*m[2]; // scale²
+    const dx = wx - m[12], dy = wy - m[13], dz = wz - m[14];
+    const lx = (m[0]*dx + m[1]*dy + m[2]*dz) / s2;
+    const ly = (m[4]*dx + m[5]*dy + m[6]*dz) / s2;
+    const lz = (m[8]*dx + m[9]*dy + m[10]*dz) / s2;
+    return {
+        x: Math.round((lx / 2 + 0.5) * surfMaxDim),
+        y: Math.round((ly / 2 + 0.5) * surfMaxDim),
+        z: Math.round((lz / 2 + 0.5) * surfMaxDim),
+    };
+}
+
+function isDomainVoxel(x, y, z) {
+    if (!domainSet || x < 0 || y < 0 || z < 0 ||
+        x >= domainNx || y >= domainNy || z >= domainNz) return false;
+    return domainSet[z * domainNx * domainNy + y * domainNx + x] === 1;
+}
+
+function rayMarchSurface(origin, dir, modelMatrix) {
+    if (!domainSet) return null;
     const [bx, by, bz] = surfBoundsCenter;
-    const wx = modelMatrix[0]*bx + modelMatrix[4]*by + modelMatrix[8]*bz + modelMatrix[12];
-    const wy = modelMatrix[1]*bx + modelMatrix[5]*by + modelMatrix[9]*bz + modelMatrix[13];
-    const wz = modelMatrix[2]*bx + modelMatrix[6]*by + modelMatrix[10]*bz + modelMatrix[14];
-    // scale factor = magnitude of first column
     const scale = Math.sqrt(modelMatrix[0]**2 + modelMatrix[1]**2 + modelMatrix[2]**2);
-    const worldCenter = [wx, wy, wz];
+    const wcx = modelMatrix[0]*bx + modelMatrix[4]*by + modelMatrix[8]*bz + modelMatrix[12];
+    const wcy = modelMatrix[1]*bx + modelMatrix[5]*by + modelMatrix[9]*bz + modelMatrix[13];
+    const wcz = modelMatrix[2]*bx + modelMatrix[6]*by + modelMatrix[10]*bz + modelMatrix[14];
     const worldRadius = surfBoundsRadius * scale;
 
+    const tEntry = raySphereHit(origin, dir, [wcx, wcy, wcz], worldRadius);
+    if (tEntry === null) return null;
+
+    // step = half a voxel-width in world space so we can't skip a surface voxel
+    const step = 0.5 * scale * 2.0 / surfMaxDim;
+    const tMax = tEntry + worldRadius * 2.0 + step * 2.0;
+
+    for (let t = tEntry; t <= tMax; t += step) {
+        const px = origin.x + dir.x * t;
+        const py = origin.y + dir.y * t;
+        const pz = origin.z + dir.z * t;
+        const v = worldToVoxel(px, py, pz, modelMatrix);
+        if (isDomainVoxel(v.x, v.y, v.z)) return { t, voxel: v };
+    }
+    return null;
+}
+
+
+function updateContinuousExcitation(modelMatrix) {
+    if (!excitationMode || !structure) return;
+
+    for (const hand of ['left', 'right']) {
+        const ctrl = hand === 'left' ? getLeftController() : getRightController();
+        if (ctrl && !ctrl.isHand && isTriggerHeld(hand)) {
+            const hit = rayMarchSurface(ctrl.origin, ctrl.direction, modelMatrix);
+            if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
+        }
+
+        if (isHandPinching(hand)) {
+            const ray = getFingerRay(hand);
+            if (ray) {
+                const hit = rayMarchSurface(ray.origin, ray.direction, modelMatrix);
+                if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
+            }
+        }
+    }
+}
+
+function updateSurfaceHitDistances(modelMatrix) {
     const L = getLeftController();
     const R = getRightController();
-    const leftDist  = (L && !L.isHand) ? raySphereHit(L.origin, L.direction, worldCenter, worldRadius) : null;
-    const rightDist = (R && !R.isHand) ? raySphereHit(R.origin, R.direction, worldCenter, worldRadius) : null;
-    setControllerHitDistances(leftDist, rightDist);
+    const leftHit  = (L && !L.isHand) ? rayMarchSurface(L.origin,  L.direction,  modelMatrix) : null;
+    const rightHit = (R && !R.isHand) ? rayMarchSurface(R.origin,  R.direction,  modelMatrix) : null;
+    setControllerHitDistances(leftHit ? leftHit.t : null, rightHit ? rightHit.t : null);
 }
 
 function mkF32Tex(w, h, data) {
@@ -286,15 +386,11 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.bindTexture(gl.TEXTURE_2D, normalTex);
     gl.uniform1i(gl.getUniformLocation(surfProg, 'u_normalTex'), 1);
 
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, getCompressedTexelIndexTexture());
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_compressedTexelIndex'), 2);
-
     const simOn = isSimulationWorking();
     gl.uniform1i(gl.getUniformLocation(surfProg, 'u_useSimTex'), simOn ? 1 : 0);
-    gl.activeTexture(gl.TEXTURE3);
+    gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, simOn ? getVoltageTexture() : posTex);
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_voltageTex'), 3);
+    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_voltageTex'), 2);
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
@@ -358,7 +454,6 @@ function onXRFrame(time, frame) {
 
     if (!isPanelGrabbed()) updateStructureManipulation();
 
-    // finger poke panel buttons
     for (const hand of ['left', 'right']) {
         const fingerRay = getFingerRay(hand);
         if (fingerRay) {
@@ -380,7 +475,10 @@ function onXRFrame(time, frame) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const modelMatrix = getStructureModelMatrix();
-    if (structure) updateSurfaceHitDistances(modelMatrix);
+    if (structure) {
+        updateSurfaceHitDistances(modelMatrix);
+        updateContinuousExcitation(modelMatrix);
+    }
 
     for (const view of pose.views) {
         const vp = glLayer.getViewport(view);
@@ -457,13 +555,14 @@ async function enterVR() {
 // ============================================================================
 const ATRIA_PATHS = {
     small: './resources/atria.json',
-    // large: './resources/atria2.json',
     large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
+    // large: './resources/atria2.json',
 };
 
 const VENTRICLE_PATHS = {
     small: './resources/ventricle_64x64x64.json',
     large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
+    // large: './resources/13-350um-192x192x192_lrv_grid.json',
 };
 
 window.addEventListener('load', () => {
@@ -504,31 +603,51 @@ window.addEventListener('load', () => {
                 const structBuf = await fetchWithProgress('Heart structure', PATH);
                 const json = JSON.parse(new TextDecoder().decode(structBuf));
                 structure = await loadStructure(json);
-                buildSurfaceBuffers(structure);
-                initCardiacSimulation(gl, structure);
+                initCardiacSimulation(gl, structure);  // must come first: builds compressedDataCPU
+                buildSurfaceBuffers(structure);         // uses getCompressedCoord from above
 
                 let sumX = 0, sumY = 0, sumZ = 0;
                 for (const v of structure.voxels) { sumX += v.x; sumY += v.y; sumZ += v.z; }
                 const vn = structure.voxels.length;
-                const cx = Math.round(sumX / vn), cy = Math.round(sumY / vn), cz = Math.round(sumZ / vn);
+                const centX = sumX / vn, centY = sumY / vn, centZ = sumZ / vn;
+
+                let bestDist = Infinity, bestVox = structure.voxels[0];
+                for (const v of structure.voxels) {
+                    const d = (v.x-centX)**2 + (v.y-centY)**2 + (v.z-centZ)**2;
+                    if (d < bestDist) { bestDist = d; bestVox = v; }
+                }
+                const cx = bestVox.x, cy = bestVox.y, cz = bestVox.z;
+
+                baseGrabCondition = (hand, wristOrigin, wristDir) => {
+                    const m = getStructureModelMatrix();
+                    const [bx, by, bz] = surfBoundsCenter;
+                    const wCx = m[0]*bx + m[4]*by + m[8]*bz + m[12];
+                    const wCy = m[1]*bx + m[5]*by + m[9]*bz + m[13];
+                    const wCz = m[2]*bx + m[6]*by + m[10]*bz + m[14];
+                    const s   = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2);
+                    return raySphereHit(
+                        { x: wristOrigin[0], y: wristOrigin[1], z: wristOrigin[2] },
+                        { x: wristDir[0],    y: wristDir[1],    z: wristDir[2]    },
+                        [wCx, wCy, wCz], surfBoundsRadius * s
+                    ) !== null;
+                };
+                setGrabCondition(baseGrabCondition);
 
                 setPanelCallbacks({
-                    startSimulation: () => { simRunning = !simRunning; if (simRunning) paceAt(cx, cy, cz, 12); },
-                    resetView:       () => paceAt(cx, cy, cz, 12),
+                    startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
+                    resetView:            () => exciteAt(cx, cy, cz, 12),
+                    toggleExcitationMode: () => setExcitationMode(!excitationMode),
                     cutX: () => stepCut('x'),
                     cutY: () => stepCut('y'),
                     cutZ: () => stepCut('z'),
                 });
-                setPaceCallback((x, y, z) => paceAt(x, y, z, 12));
+                setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
 
                 window.addEventListener('keydown', e => {
                     if (!structure) return;
-                    let sx = 0, sy = 0, sz = 0;
-                    for (const v of structure.voxels) { sx += v.x; sy += v.y; sz += v.z; }
-                    const n = structure.voxels.length;
-                    const kx = Math.round(sx/n), ky = Math.round(sy/n), kz = Math.round(sz/n);
-                    if (e.code === 'Space') { e.preventDefault(); simRunning = !simRunning; if (simRunning && isSimulationWorking()) paceAt(kx, ky, kz, 12); }
-                    else if (e.code === 'KeyP') { if (isSimulationWorking()) paceAt(kx, ky, kz, 12); }
+                    const kx = cx, ky = cy, kz = cz;
+                    if (e.code === 'Space') { e.preventDefault(); simRunning = !simRunning; if (simRunning && isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
+                    else if (e.code === 'KeyE') { if (isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
                     else if (e.code === 'KeyR') { resetSimulation(); simRunning = false; }
                 });
             } catch (e) {

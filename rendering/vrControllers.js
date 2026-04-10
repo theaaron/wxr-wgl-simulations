@@ -2,11 +2,10 @@
 import { pickVoxel } from './renderStructure.js';
 import { triggerPanelButton, isHoveringPanel, rayIntersectsPanel } from './vrPanel.js';
 
-// pacing callback - set by main app
-let paceCallback = null;
+let exciteCallback = null;
 
-export function setPaceCallback(callback) {
-    paceCallback = callback;
+export function setExciteCallback(callback) {
+    exciteCallback = callback;
 }
 
 const RAY_LENGTH = 5.0;
@@ -26,14 +25,12 @@ let rayCylinderIndexCount = 0;
 let leftHitDistance = null;
 let rightHitDistance = null;
 
-// vr ui button state
 let vrButtonProgram = null;
 let vrButtonBuffer = null;
 let vrButtonIndexBuffer = null;
 let leftHoveringButton = false;
 let rightHoveringButton = false;
 
-// button position and size (in world space)
 const VR_BUTTON = {
     position: [0.3, 0.0, -0.8],
     width: 0.25,
@@ -41,7 +38,6 @@ const VR_BUTTON = {
     normal: [0, 0, 1]
 };
 
-// vr button shaders
 const VR_BUTTON_VS = `#version 300 es
 in vec3 a_position;
 uniform mat4 u_projectionMatrix;
@@ -73,7 +69,6 @@ void main() {
 }
 `;
 
-// structure manipulation state
 let structureTransform = {
     position: [0, 0, -0.5],
     rotation: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
@@ -139,7 +134,6 @@ export function initVRControllers(gl) {
 }
 
 function createVRButtonGeometry(gl) {
-    // Simple quad centered at origin, will be transformed by shader
     const vertices = new Float32Array([
         -0.5, -0.5, 0,
         0.5, -0.5, 0,
@@ -177,33 +171,24 @@ function createVRButtonProgram(gl) {
     return program;
 }
 
-// Check if a ray intersects the VR button plane
 function rayIntersectsButton(origin, direction) {
     const btnPos = VR_BUTTON.position;
     const btnNormal = VR_BUTTON.normal;
 
-    // Plane equation: dot(normal, point - planePoint) = 0
-    // Ray: origin + t * direction
-    // Solve for t
-
     const denom = btnNormal[0] * direction.x + btnNormal[1] * direction.y + btnNormal[2] * direction.z;
 
-    // Ray parallel to plane
     if (Math.abs(denom) < 0.0001) return null;
 
     const t = ((btnPos[0] - origin.x) * btnNormal[0] +
         (btnPos[1] - origin.y) * btnNormal[1] +
         (btnPos[2] - origin.z) * btnNormal[2]) / denom;
 
-    // Intersection behind ray origin
     if (t < 0) return null;
 
-    // Calculate intersection point
     const hitX = origin.x + t * direction.x;
     const hitY = origin.y + t * direction.y;
     const hitZ = origin.z + t * direction.z;
 
-    // Check if hit is within button bounds
     const halfW = VR_BUTTON.width / 2;
     const halfH = VR_BUTTON.height / 2;
 
@@ -221,7 +206,6 @@ function createRayCylinderGeometry(gl) {
     const vertices = [];
     const indices = [];
 
-    // cylinder from z=0 to z=-1, scaled by ray length in shader
     for (let i = 0; i <= RAY_SEGMENTS; i++) {
         const angle = (i / RAY_SEGMENTS) * Math.PI * 2;
         const x = Math.cos(angle) * RAY_RADIUS;
@@ -241,7 +225,6 @@ function createRayCylinderGeometry(gl) {
         indices.push(topRight, bottomLeft, bottomRight);
     }
 
-    // end cap
     const centerIndex = vertices.length / 3;
     vertices.push(0, 0, -1);
 
@@ -317,12 +300,12 @@ function onSelect(event) {
             return;
         }
 
-        if (isGrabbing && paceCallback) {
-            // grip + trigger = pace at ray intersection
+        if (isGrabbing && exciteCallback) {
+            // grip + trigger = excite at ray intersection
             if (hand === 'left' && leftController) {
-                requestPaceAtRay(leftController);
+                requestExciteAtRay(leftController);
             } else if (hand === 'right' && rightController) {
-                requestPaceAtRay(rightController);
+                requestExciteAtRay(rightController);
             }
         } else {
             // trigger only = pick voxel
@@ -335,16 +318,32 @@ function onSelect(event) {
     }
 }
 
-function requestPaceAtRay(controller) {
+function requestExciteAtRay(controller) {
     if (controller.handedness === 'left') {
-        window.leftControllerPaceRequested = true;
+        window.leftControllerExciteRequested = true;
     } else if (controller.handedness === 'right') {
-        window.rightControllerPaceRequested = true;
+        window.rightControllerExciteRequested = true;
     }
 }
 
-function onSelectStart(event) { }
-function onSelectEnd(event) { }
+// per-controller trigger-held state for continuous excitation
+const triggerHeld = { left: false, right: false };
+
+export function isTriggerHeld(handedness) {
+    return triggerHeld[handedness] ?? false;
+}
+
+function onSelectStart(event) {
+    if (event.inputSource.hand) return;
+    const hand = event.inputSource.handedness;
+    if (hand === 'left' || hand === 'right') triggerHeld[hand] = true;
+}
+
+function onSelectEnd(event) {
+    if (event.inputSource.hand) return;
+    const hand = event.inputSource.handedness;
+    if (hand === 'left' || hand === 'right') triggerHeld[hand] = false;
+}
 
 function onSqueeze(event) { }
 
@@ -431,12 +430,9 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
         initPickingFBO(gl);
     }
 
-    // narrow FOV for precise picking
     const pickProjMatrix = createPickProjectionMatrix(10);
     const pickViewMatrix = invertMatrix(controller.matrix);
 
-    // combine manipulation matrix with base structure matrix
-    // use dynamic globalScale from window (set by renderStructure)
     const globalScale = window.renderStructureGlobalScale || 0.02;
     const zScale = 1.0;
     const baseMatrix = new Float32Array([
@@ -509,7 +505,6 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
 
     const pixel = pickingPixelBuffer;
 
-    // magenta = no hit (clear color)
     if (pixel[0] === 255 && pixel[1] === 0 && pixel[2] === 255) {
         return null;
     }
@@ -522,23 +517,19 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
 
     const voxel = structure.voxels[instanceID];
 
-    // calculate world position by transforming through the full model matrix
     const centerVoxX = structure.dimensions.nx / 2;
     const centerVoxY = structure.dimensions.ny / 2;
     const centerVoxZ = structure.dimensions.nz / 2;
 
-    // local position (before model matrix)
     const localX = voxel.x - centerVoxX;
     const localY = voxel.y - centerVoxY;
     const localZ = voxel.z - centerVoxZ;
 
-    // transform through full model matrix (includes grab/rotate/scale)
     const m = actualModelMatrix;
     const voxelWorldX = m[0] * localX + m[4] * localY + m[8] * localZ + m[12];
     const voxelWorldY = m[1] * localX + m[5] * localY + m[9] * localZ + m[13];
     const voxelWorldZ = m[2] * localX + m[6] * localY + m[10] * localZ + m[14];
 
-    // project onto ray direction for hit distance
     const toVoxelX = voxelWorldX - controller.origin.x;
     const toVoxelY = voxelWorldY - controller.origin.y;
     const toVoxelZ = voxelWorldZ - controller.origin.z;
@@ -549,7 +540,6 @@ export function processControllerPick(gl, controller, cubeBuffer, indexBuffer, m
 
     const distanceAlongRay = toVoxelX * dirX + toVoxelY * dirY + toVoxelZ * dirZ;
 
-    // subtract half voxel size to stop ray at surface
     const voxelWorldSize = voxelScale * globalScale * (modelMatrix[0] || 1);
     const hitDistance = Math.max(0.01, distanceAlongRay - voxelWorldSize * 0.5);
 
@@ -1029,11 +1019,11 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
         }
 
         // pacing: grip + trigger
-        if (window.leftControllerPaceRequested) {
-            window.leftControllerPaceRequested = false;
-            if (lastLeftPick && paceCallback) {
-                paceCallback(lastLeftPick.x, lastLeftPick.y, lastLeftPick.z);
-                console.log(`⚡ LEFT CONTROLLER PACED at (${lastLeftPick.x}, ${lastLeftPick.y}, ${lastLeftPick.z})`);
+        if (window.leftControllerExciteRequested) {
+            window.leftControllerExciteRequested = false;
+            if (lastLeftPick && exciteCallback) {
+                exciteCallback(lastLeftPick.x, lastLeftPick.y, lastLeftPick.z);
+                console.log(`⚡ LEFT CONTROLLER EXCITED at (${lastLeftPick.x}, ${lastLeftPick.y}, ${lastLeftPick.z})`);
             }
         }
     } else {
@@ -1044,8 +1034,8 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     if (window.leftControllerPickRequested) {
         window.leftControllerPickRequested = false;
     }
-    if (window.leftControllerPaceRequested) {
-        window.leftControllerPaceRequested = false;
+    if (window.leftControllerExciteRequested) {
+        window.leftControllerExciteRequested = false;
     }
 
     if (rightController) {
@@ -1069,11 +1059,11 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
         }
 
         // pacing: grip + trigger
-        if (window.rightControllerPaceRequested) {
-            window.rightControllerPaceRequested = false;
-            if (lastRightPick && paceCallback) {
-                paceCallback(lastRightPick.x, lastRightPick.y, lastRightPick.z);
-                console.log(`⚡ RIGHT CONTROLLER PACED at (${lastRightPick.x}, ${lastRightPick.y}, ${lastRightPick.z})`);
+        if (window.rightControllerExciteRequested) {
+            window.rightControllerExciteRequested = false;
+            if (lastRightPick && exciteCallback) {
+                exciteCallback(lastRightPick.x, lastRightPick.y, lastRightPick.z);
+                console.log(`⚡ RIGHT CONTROLLER EXCITED at (${lastRightPick.x}, ${lastRightPick.y}, ${lastRightPick.z})`);
             }
         }
     } else {
@@ -1084,8 +1074,8 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
     if (window.rightControllerPickRequested) {
         window.rightControllerPickRequested = false;
     }
-    if (window.rightControllerPaceRequested) {
-        window.rightControllerPaceRequested = false;
+    if (window.rightControllerExciteRequested) {
+        window.rightControllerExciteRequested = false;
     }
 }
 

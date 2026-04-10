@@ -2,9 +2,9 @@ import { setHandGrabState, updateHandControllerPose, updateStructureManipulation
 
 const PINCH_THRESHOLD = 0.025;
 const PINCH_RELEASE = 0.045;
-const TAP_DISTANCE_THRESHOLD = 0.04; // fingertip must be this close to voxel surface (meters)
+const TAP_DISTANCE_THRESHOLD = 0.04;
 const TAP_COOLDOWN_MS = 400;
-const PANEL_POKE_DEPTH = 0.02; // how close finger must be to panel plane (meters)
+const PANEL_POKE_DEPTH = 0.02;
 const PANEL_POKE_COOLDOWN_MS = 500;
 
 const THUMB_TIP = 'thumb-tip';
@@ -15,6 +15,12 @@ const WRIST = 'wrist';
 let leftPinching = false;
 let rightPinching = false;
 let handsSupported = false;
+
+let grabCondition = null;
+
+export function setGrabCondition(fn) {
+    grabCondition = fn;
+}
 
 let leftFingerRay = null;
 let rightFingerRay = null;
@@ -110,12 +116,17 @@ export function updateHandTracking(frame, referenceSpace) {
         updateHandControllerPose(hand, wristMatrix);
 
         if (pinch && !wasPinching) {
-            setHandGrabState(hand, true, wristMatrix, pinchOrigin);
+            let allowGrab = true;
+            if (grabCondition) {
+                const wx = wristMatrix[12], wy = wristMatrix[13], wz = wristMatrix[14];
+                const dx = -wristMatrix[8], dy = -wristMatrix[9], dz = -wristMatrix[10];
+                allowGrab = grabCondition(hand, [wx, wy, wz], [dx, dy, dz]);
+            }
+            if (allowGrab) setHandGrabState(hand, true, wristMatrix, pinchOrigin);
         } else if (!pinch && wasPinching) {
             setHandGrabState(hand, false, null, null);
         }
 
-        // --- Finger ray for poke/tap (only when NOT pinching) ---
         if (!pinch && indexDistal) {
             const tip = indexTip.position;
             const dis = indexDistal.position;
