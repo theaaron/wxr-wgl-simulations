@@ -127,7 +127,7 @@ export function updateHandTracking(frame, referenceSpace) {
             setHandGrabState(hand, false, null, null);
         }
 
-        if (!pinch && indexDistal) {
+        if (indexDistal) {
             const tip = indexTip.position;
             const dis = indexDistal.position;
 
