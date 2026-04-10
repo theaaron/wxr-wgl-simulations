@@ -4,7 +4,8 @@ import {
     initVRControllers, setupControllerInput, updateControllers,
     getStructureModelMatrix, updateStructureManipulation,
     setExciteCallback, getLeftController, getRightController,
-    renderControllerRays, setControllerHitDistances, isTriggerHeld
+    renderControllerRays, setControllerHitDistances, isTriggerHeld,
+    setExcitationActive
 } from './rendering/vrControllers.js';
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
@@ -146,6 +147,7 @@ function setExcitationMode(active) {
     excitationMode = active;
     setButtonActive('btn_0_1', active);
     setGrabCondition(active ? () => false : baseGrabCondition);
+    setExcitationActive(active);
 }
 
 // ============================================================================
@@ -467,6 +469,10 @@ function onXRFrame(time, frame) {
 
     if (simRunning) stepSimulation(getStepsPerFrame());
 
+    const modelMatrix = getStructureModelMatrix();
+    
+    if (structure) updateContinuousExcitation(modelMatrix);
+
     const pose = frame.getViewerPose(xrReferenceSpace);
     if (!pose) return;
     const glLayer = xrSession.renderState.baseLayer;
@@ -474,11 +480,7 @@ function onXRFrame(time, frame) {
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const modelMatrix = getStructureModelMatrix();
-    if (structure) {
-        updateSurfaceHitDistances(modelMatrix);
-        updateContinuousExcitation(modelMatrix);
-    }
+    if (structure) updateSurfaceHitDistances(modelMatrix);
 
     for (const view of pose.views) {
         const vp = glLayer.getViewport(view);

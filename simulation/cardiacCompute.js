@@ -660,8 +660,6 @@ export function exciteAt(x, y, z, radius = 5) {
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     currentBuffer = 1 - currentBuffer;
-    
-    console.log(`Excited at (${x}, ${y}, ${z}) with radius ${radius}`);
 }
 
 export function getVoltageTexture() {

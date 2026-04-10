@@ -8,6 +8,11 @@ export function setExciteCallback(callback) {
     exciteCallback = callback;
 }
 
+let excitationModeActive = false;
+export function setExcitationActive(active) {
+    excitationModeActive = active;
+}
+
 const RAY_LENGTH = 5.0;
 const RAY_COLOR = [0.5, 0.5, 0.5];
 const RAY_HIT_COLOR = [0.0, 1.0, 0.0];
@@ -299,6 +304,8 @@ function onSelect(event) {
             triggerPanelButton();
             return;
         }
+
+        if (excitationModeActive) return;
 
         if (isGrabbing && exciteCallback) {
             // grip + trigger = excite at ray intersection
