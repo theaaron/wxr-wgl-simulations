@@ -297,7 +297,9 @@ function rayMarchSurface(origin, dir, modelMatrix) {
     const wcz = modelMatrix[2]*bx + modelMatrix[6]*by + modelMatrix[10]*bz + modelMatrix[14];
     const worldRadius = surfBoundsRadius * scale;
 
-    const tEntry = raySphereHit(origin, dir, [wcx, wcy, wcz], worldRadius);
+    const lx = origin.x - wcx, ly = origin.y - wcy, lz = origin.z - wcz;
+    const insideSphere = (lx*lx + ly*ly + lz*lz) <= worldRadius * worldRadius;
+    const tEntry = insideSphere ? 0 : raySphereHit(origin, dir, [wcx, wcy, wcz], worldRadius);
     if (tEntry === null) return null;
 
     // step = half a voxel-width in world space so we can't skip a surface voxel
