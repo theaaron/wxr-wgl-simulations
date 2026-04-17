@@ -5,7 +5,7 @@ import {
     getStructureModelMatrix, updateStructureManipulation,
     setExciteCallback, getLeftController, getRightController,
     renderControllerRays, setControllerHitDistances, isTriggerHeld,
-    setExcitationActive
+    setExcitationActive, resetStructureTransform
 } from './rendering/vrControllers.js';
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
@@ -660,7 +660,7 @@ window.addEventListener('load', () => {
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
-                    resetView:            () => exciteAt(cx, cy, cz, 12),
+                    resetView:            () => resetStructureTransform(),
                     toggleExcitationMode: () => setExcitationMode(!excitationMode),
                     cutX: () => stepCut('x'),
                     cutY: () => stepCut('y'),

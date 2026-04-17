@@ -867,9 +867,9 @@ export function getStructureModelMatrix() {
 }
 
 export function resetStructureTransform() {
-    structureTransform.position = [0, 0, 0];
+    structureTransform.position = [0, 0, -0.5];
     structureTransform.rotation = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-    structureTransform.scale = 1.0;
+    structureTransform.scale = 0.2;
 }
 
 export function setHandGrabState(hand, grabbing, matrix, origin) {
