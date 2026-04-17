@@ -713,6 +713,7 @@ layout(location = 1) in vec2 a_compIdx;
 uniform sampler2D   u_posTex;
 uniform sampler2D   u_normalTex;
 uniform sampler2D   u_voltageTex;
+uniform sampler2D   u_ablationTex;
 uniform bool        u_useSimTex;
 
 uniform mat4  u_projectionMatrix;
@@ -729,6 +730,7 @@ out vec3  v_E;
 out float v_voltage;
 out float v_useVoltage;
 out float v_cut;
+out float v_ablated;
 
 void main() {
     ivec2 voxIdx = ivec2(a_compIdx);
@@ -742,6 +744,8 @@ void main() {
     float nLen = length(rawN);
     v_N = (nLen > 0.01) ? normalize(mat3(u_normalMatrix) * rawN) : vec3(0.0, 1.0, 0.0);
     v_E = normalize(-(u_viewMatrix * u_modelMatrix * vec4(worldPos, 1.0)).xyz);
+
+    v_ablated = texelFetch(u_ablationTex, voxIdx, 0).r;
 
     if (u_useSimTex) {
         v_voltage    = texelFetch(u_voltageTex, voxIdx, 0).r;
@@ -763,6 +767,7 @@ in vec3  v_E;
 in float v_voltage;
 in float v_useVoltage;
 in float v_cut;
+in float v_ablated;
 
 uniform vec3  u_lightDirection;
 uniform vec4  u_lightColor;
@@ -785,6 +790,12 @@ vec3 jetColor(float t) {
 
 void main() {
     if (v_cut > 0.5) discard;
+
+    // ablated tissue bypasses voltage coloring, just giving it a dark gray color. 
+    if (v_ablated > 0.5) {
+        fragColor = vec4(0.25, 0.2, 0.2, 1.0);
+        return;
+    }
 
     vec4 mColor = (v_useVoltage > 0.5 && v_voltage > 0.05)
         ? vec4(jetColor(v_voltage), 1.0)

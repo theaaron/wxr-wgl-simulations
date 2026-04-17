@@ -10,6 +10,8 @@ const PANEL_POKE_COOLDOWN_MS = 500;
 const THUMB_TIP = 'thumb-tip';
 const INDEX_TIP = 'index-finger-tip';
 const INDEX_DISTAL = 'index-finger-phalanx-distal';
+const MIDDLE_TIP = 'middle-finger-tip';
+const MIDDLE_DISTAL = 'middle-finger-phalanx-distal';
 const WRIST = 'wrist';
 
 let leftPinching = false;
@@ -24,6 +26,8 @@ export function setGrabCondition(fn) {
 
 let leftFingerRay = null;
 let rightFingerRay = null;
+let leftMiddleRay = null;
+let rightMiddleRay = null;
 
 let leftTapState = { wasTouching: false, lastTapTime: 0, pickRequested: false, pickedVoxel: null };
 let rightTapState = { wasTouching: false, lastTapTime: 0, pickRequested: false, pickedVoxel: null };
@@ -96,6 +100,8 @@ export function updateHandTracking(frame, referenceSpace) {
         const thumbTip = jointPos(frame, referenceSpace, inputSource, THUMB_TIP);
         const indexTip = jointPos(frame, referenceSpace, inputSource, INDEX_TIP);
         const indexDistal = jointPos(frame, referenceSpace, inputSource, INDEX_DISTAL);
+        const middleTip = jointPos(frame, referenceSpace, inputSource, MIDDLE_TIP);
+        const middleDistal = jointPos(frame, referenceSpace, inputSource, MIDDLE_DISTAL);
         const wrist = jointPos(frame, referenceSpace, inputSource, WRIST);
 
         if (!thumbTip || !indexTip || !wrist) continue;
@@ -153,6 +159,24 @@ export function updateHandTracking(frame, referenceSpace) {
             if (hand === 'left') leftFingerRay = null;
             else rightFingerRay = null;
         }
+
+        // middle finger for ablation
+        if (middleTip && middleDistal) {
+            const tip = middleTip.position;
+            const dis = middleDistal.position;
+            const dx = tip.x - dis.x, dy = tip.y - dis.y, dz = tip.z - dis.z;
+            const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (len > 0.001) {
+                const direction = { x: dx/len, y: dy/len, z: dz/len };
+                const matrix = buildFingerMatrix(tip, direction);
+                const ray = matrix ? { matrix, origin: { x: tip.x, y: tip.y, z: tip.z }, direction, handedness: hand } : null;
+                if (hand === 'left') leftMiddleRay = ray;
+                else rightMiddleRay = ray;
+            }
+        } else {
+            if (hand === 'left') leftMiddleRay = null;
+            else rightMiddleRay = null;
+        }
     }
 
     if (!sawHand && handsSupported) {
@@ -160,6 +184,8 @@ export function updateHandTracking(frame, referenceSpace) {
         if (rightPinching) { setHandGrabState('right', false, null, null); rightPinching = false; }
         leftFingerRay = null;
         rightFingerRay = null;
+        leftMiddleRay = null;
+        rightMiddleRay = null;
     }
 }
 
@@ -212,6 +238,10 @@ export function consumeFingerPanelPoke(hand) {
 
 export function getFingerRay(hand) {
     return hand === 'left' ? leftFingerRay : rightFingerRay;
+}
+
+export function getMiddleFingerRay(hand) {
+    return hand === 'left' ? leftMiddleRay : rightMiddleRay;
 }
 
 export function isHandPinching(hand) {

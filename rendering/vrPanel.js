@@ -56,7 +56,8 @@ function generateButtons() {
                 activeColor: [0.7, 0.35, 0.0],
                 action: isStart  ? 'startSimulation'
                       : isExcite ? 'toggleExcitationMode'
-                      : (r === 0 && c === 2) ? 'resetView'
+                      : (r === 0 && c === 2) ? 'toggleAblationMode'
+                      : (r === 1 && c === 1) ? 'resetView'
                       : (r === 2 && c === 0) ? 'cutX'
                       : (r === 2 && c === 1) ? 'cutY'
                       : (r === 2 && c === 2) ? 'cutZ'
@@ -241,7 +242,8 @@ export function initVRPanel(glContext) {
 
     buttonLabels['btn_0_0'] = 'Solve';
     buttonLabels['btn_0_1'] = 'Excite';
-    buttonLabels['btn_0_2'] = 'Reset';
+    buttonLabels['btn_0_2'] = 'Ablate';
+    buttonLabels['btn_1_1'] = 'Reset';
     buttonLabels['btn_2_0'] = 'Cut X';
     buttonLabels['btn_2_1'] = 'Cut Y';
     buttonLabels['btn_2_2'] = 'Cut Z';

@@ -5,7 +5,9 @@
 let gl = null;
 let initialized = false;
 
-// texture dimensions (compressed domain)
+let ablationTexture = null;
+export function setAblationTexture(tex) { ablationTexture = tex; }
+
 let compWidth = 0;
 let compHeight = 0;
 let fullWidth = 0;
@@ -86,6 +88,7 @@ uniform sampler2D icolor0;
 uniform sampler2D vlt_txtr;
 uniform usampler2D idir0;
 uniform usampler2D idir1;
+uniform sampler2D ablationMap;
 
 uniform float dt;
 uniform float diffCoef;
@@ -130,6 +133,12 @@ void main() {
     ivec2 texelPos = ivec2(cc * vec2(isize));
     
     vec4 color0 = texelFetch(icolor0, texelPos, 0);
+
+    // ablation hook: force resting state every timestep for ablated voxels
+    if (texelFetch(ablationMap, texelPos, 0).r > 0.5) {
+        ocolor0 = vec4(0.0, 1.0, 1.0, 0.03);
+        return;
+    }
     
     uvec4 dir0 = texelFetch(idir0, texelPos, 0);
     uvec4 dir1 = texelFetch(idir1, texelPos, 0);
@@ -567,6 +576,11 @@ function runTimeStep() {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, dir1);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'idir1'), 2);
+
+    // ablation hook — bind ablation map (or a null-safe fallback) to unit 3
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, ablationTexture || null);
+    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'ablationMap'), 3);
     
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'dt'), params.dt);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'diffCoef'), params.diffCoef);
@@ -598,14 +612,12 @@ function runTimeStep() {
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_sm'), params.t_sm);
     gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_sp'), params.t_sp);
     
-    // draw
     gl.bindVertexArray(quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     
-    // swap buffers
     currentBuffer = 1 - currentBuffer;
 }
 
@@ -700,7 +712,6 @@ export function readVoltageData() {
     
     const readTex = currentBuffer === 0 ? fcolor0 : scolor0;
     
-    // create temp FBO to read from
     const readFBO = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, readFBO);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, readTex, 0);
@@ -716,6 +727,10 @@ export function readVoltageData() {
 
 export function getCompressedDimensions() {
     return { width: compWidth, height: compHeight };
+}
+
+export function getAblationParams() {
+    return { compWidth, compHeight, fullWidth, fullHeight, mx, my, fullTexelIndex };
 }
 
 export function resetSimulation() {

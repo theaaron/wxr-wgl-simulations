@@ -13,7 +13,7 @@ import {
     setButtonActive
 } from './rendering/vrPanel.js';
 import {
-    updateHandTracking, getFingerRay,
+    updateHandTracking, getFingerRay, getMiddleFingerRay,
     processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching,
     setGrabCondition
 } from './rendering/handTracking.js';
@@ -23,8 +23,10 @@ import { initHandRenderer, renderHands } from './rendering/renderHands.js';
 import {
     initCardiacSimulation, stepSimulation, exciteAt,
     isSimulationWorking, getVoltageTexture, getCompressedCoord,
-    getCompressedDimensions, getStepsPerFrame, resetSimulation
+    getCompressedDimensions, getStepsPerFrame, resetSimulation,
+    setAblationTexture, getAblationParams
 } from './simulation/cardiacCompute.js';
+import { initAblation, ablateAt, resetAblation, getAblationTexture } from './simulation/ablationCompute.js';
 
 // ============================================================================
 // UTILITIES
@@ -125,7 +127,7 @@ let simRunning = false;
 let surfBoundsCenter = [0, 0, 0];
 let surfBoundsRadius = 1.5;
 let surfMaxDim = 64;
-// matches original clickRadius=0.05 in normalized (v/maxDim) coordinates space
+
 let exciteRadius = Math.round(0.05 * surfMaxDim);
 
 let domainSet = null;
@@ -140,11 +142,19 @@ function stepCut(axis) {
 }
 
 let excitationMode = false;
+let ablationMode = false;
 
 let baseGrabCondition = null;
 
+function setAblationMode(active) {
+    ablationMode = active;
+    if (active && excitationMode) setExcitationMode(false);
+    setButtonActive('btn_0_2', active);
+}
+
 function setExcitationMode(active) {
     excitationMode = active;
+    if (active && ablationMode) setAblationMode(false);
     setButtonActive('btn_0_1', active);
     if (active) {
         setGrabCondition((hand, pos, dir) =>
@@ -343,6 +353,32 @@ function updateContinuousExcitation(modelMatrix) {
     }
 }
 
+const ablateRadius = 3;
+
+function updateContinuousAblation(modelMatrix) {
+    if (!structure) return;
+
+    if (ablationMode) {
+        for (const hand of ['left', 'right']) {
+            const ctrl = hand === 'left' ? getLeftController() : getRightController();
+            if (ctrl && !ctrl.isHand && isTriggerHeld(hand)) {
+                const hit = rayMarchSurface(ctrl.origin, ctrl.direction, modelMatrix);
+                if (hit) ablateAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, ablateRadius);
+            }
+        }
+    }
+
+    for (const hand of ['left', 'right']) {
+        const middleRay = getMiddleFingerRay(hand);
+        if (middleRay) {
+            const hit = rayMarchSurface(middleRay.origin, middleRay.direction, modelMatrix);
+            if (hit && hit.t < 0.05) {
+                ablateAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, ablateRadius);
+            }
+        }
+    }
+}
+
 function updateSurfaceHitDistances(modelMatrix) {
     const L = getLeftController();
     const R = getRightController();
@@ -401,6 +437,10 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, simOn ? getVoltageTexture() : posTex);
     gl.uniform1i(gl.getUniformLocation(surfProg, 'u_voltageTex'), 2);
+
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, getAblationTexture() || posTex);
+    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_ablationTex'), 3);
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
@@ -485,6 +525,7 @@ function onXRFrame(time, frame) {
     const modelMatrix = getStructureModelMatrix();
 
     if (structure) updateContinuousExcitation(modelMatrix);
+    if (structure) updateContinuousAblation(modelMatrix);
 
     const pose = frame.getViewerPose(xrReferenceSpace);
     if (!pose) return;
@@ -630,6 +671,7 @@ window.addEventListener('load', () => {
                 const json = JSON.parse(new TextDecoder().decode(structBuf));
                 structure = await loadStructure(json);
                 initCardiacSimulation(gl, structure);
+                initAblation(gl, getAblationParams(), setAblationTexture);
                 buildSurfaceBuffers(structure);
 
                 let sumX = 0, sumY = 0, sumZ = 0;
@@ -660,8 +702,9 @@ window.addEventListener('load', () => {
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
-                    resetView:            () => { resetStructureTransform(); resetSimulation(); simRunning = false; },
+                    resetView:            () => { resetStructureTransform(); resetSimulation(); resetAblation(); simRunning = false; },
                     toggleExcitationMode: () => setExcitationMode(!excitationMode),
+                    toggleAblationMode:   () => setAblationMode(!ablationMode),
                     cutX: () => stepCut('x'),
                     cutY: () => stepCut('y'),
                     cutZ: () => stepCut('z'),
