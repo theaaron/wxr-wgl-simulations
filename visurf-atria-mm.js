@@ -146,7 +146,13 @@ let baseGrabCondition = null;
 function setExcitationMode(active) {
     excitationMode = active;
     setButtonActive('btn_0_1', active);
-    setGrabCondition(active ? () => false : baseGrabCondition);
+    if (active) {
+        setGrabCondition((hand, pos, dir) =>
+            hand === 'left' ? (baseGrabCondition ? baseGrabCondition('left', pos, dir) : true) : false
+        );
+    } else {
+        setGrabCondition(baseGrabCondition);
+    }
     setExcitationActive(active);
 }
 
@@ -326,13 +332,13 @@ function updateContinuousExcitation(modelMatrix) {
             const hit = rayMarchSurface(ctrl.origin, ctrl.direction, modelMatrix);
             if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
         }
+    }
 
-        const fingerRay = getFingerRay(hand);
-        if (fingerRay) {
-            const hit = rayMarchSurface(fingerRay.origin, fingerRay.direction, modelMatrix);
-            if (hit && hit.t < 0.05) {
-                exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
-            }
+    const fingerRay = getFingerRay('right');
+    if (fingerRay) {
+        const hit = rayMarchSurface(fingerRay.origin, fingerRay.direction, modelMatrix);
+        if (hit && hit.t < 0.05) {
+            exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
         }
     }
 }
