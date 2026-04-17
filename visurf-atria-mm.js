@@ -325,11 +325,11 @@ function updateContinuousExcitation(modelMatrix) {
             if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
         }
 
-        if (isHandPinching(hand)) {
-            const ray = getFingerRay(hand);
-            if (ray) {
-                const hit = rayMarchSurface(ray.origin, ray.direction, modelMatrix);
-                if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
+        const fingerRay = getFingerRay(hand);
+        if (fingerRay) {
+            const hit = rayMarchSurface(fingerRay.origin, fingerRay.direction, modelMatrix);
+            if (hit && hit.t < 0.05) {
+                exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
             }
         }
     }
@@ -470,7 +470,7 @@ function onXRFrame(time, frame) {
     if (simRunning) stepSimulation(getStepsPerFrame());
 
     const modelMatrix = getStructureModelMatrix();
-    
+
     if (structure) updateContinuousExcitation(modelMatrix);
 
     const pose = frame.getViewerPose(xrReferenceSpace);
@@ -605,8 +605,8 @@ window.addEventListener('load', () => {
                 const structBuf = await fetchWithProgress('Heart structure', PATH);
                 const json = JSON.parse(new TextDecoder().decode(structBuf));
                 structure = await loadStructure(json);
-                initCardiacSimulation(gl, structure);  // must come first: builds compressedDataCPU
-                buildSurfaceBuffers(structure);         // uses getCompressedCoord from above
+                initCardiacSimulation(gl, structure);
+                buildSurfaceBuffers(structure);
 
                 let sumX = 0, sumY = 0, sumZ = 0;
                 for (const v of structure.voxels) { sumX += v.x; sumY += v.y; sumZ += v.z; }
@@ -627,11 +627,10 @@ window.addEventListener('load', () => {
                     const wCy = m[1]*bx + m[5]*by + m[9]*bz + m[13];
                     const wCz = m[2]*bx + m[6]*by + m[10]*bz + m[14];
                     const s   = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2);
-                    return raySphereHit(
-                        { x: wristOrigin[0], y: wristOrigin[1], z: wristOrigin[2] },
-                        { x: wristDir[0],    y: wristDir[1],    z: wristDir[2]    },
-                        [wCx, wCy, wCz], surfBoundsRadius * s
-                    ) !== null;
+                    const dx = wristOrigin[0] - wCx;
+                    const dy = wristOrigin[1] - wCy;
+                    const dz = wristOrigin[2] - wCz;
+                    return Math.sqrt(dx*dx + dy*dy + dz*dz) < surfBoundsRadius * s * 2.5;
                 };
                 setGrabCondition(baseGrabCondition);
 
