@@ -660,7 +660,7 @@ window.addEventListener('load', () => {
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
-                    resetView:            () => resetStructureTransform(),
+                    resetView:            () => { resetStructureTransform(); resetSimulation(); simRunning = false; },
                     toggleExcitationMode: () => setExcitationMode(!excitationMode),
                     cutX: () => stepCut('x'),
                     cutY: () => stepCut('y'),
