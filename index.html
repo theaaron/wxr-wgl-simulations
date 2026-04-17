@@ -32,6 +32,13 @@
                     <button class="sel-btn" disabled>TBD</button>
                 </div>
             </div>
+            <div class="selector-row">
+                <span class="selector-label">Mode</span>
+                <div class="btn-group">
+                    <button class="sel-btn active" data-axis="mode" data-value="vr">VR</button>
+                    <button class="sel-btn" data-axis="mode" data-value="ar">AR</button>
+                </div>
+            </div>
         </div>
 
         <button id="launch-btn">Launch</button>
@@ -54,7 +61,7 @@
             model:     { mm: 'Minimal Model', tp: 'Ten Tusscher', ord: 'ORd' },
         };
 
-        const sel = { structure: 'atria', renderer: 'surface', model: 'mm' };
+        const sel = { structure: 'atria', renderer: 'surface', model: 'mm', mode: 'vr' };
 
         function key() { return `${sel.structure}-${sel.renderer}-${sel.model}`; }
 
@@ -84,7 +91,7 @@
 
         document.getElementById('launch-btn').addEventListener('click', () => {
             const url = ROUTES[key()];
-            if (url) window.location.href = url;
+            if (url) window.location.href = `${url}?mode=${sel.mode}`;
         });
 
         update();

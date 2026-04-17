@@ -416,11 +416,16 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
 }
 
 // ============================================================================
+// AR / VR MODE
+// ============================================================================
+const useAR = new URLSearchParams(location.search).get('mode') === 'ar';
+
+// ============================================================================
 // INIT GL
 // ============================================================================
 function initGL() {
     const canvas = document.createElement('canvas');
-    gl = canvas.getContext('webgl2', { xrCompatible: true, antialias: true, alpha: false });
+    gl = canvas.getContext('webgl2', { xrCompatible: true, antialias: true, alpha: useAR });
     if (!gl) { console.error('WebGL2 not available'); return false; }
     gl.getExtension('EXT_color_buffer_float');
     surfProg = mkProgram(gl, SURF_VS, SURF_FS, 'Surface');
@@ -486,7 +491,7 @@ function onXRFrame(time, frame) {
     const glLayer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     gl.disable(gl.SCISSOR_TEST);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(0, 0, 0, useAR ? 0 : 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (structure) updateSurfaceHitDistances(modelMatrix);
 
@@ -496,7 +501,7 @@ function onXRFrame(time, frame) {
         gl.scissor(vp.x, vp.y, vp.width, vp.height);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);
         drawSurface(view.projectionMatrix, view.transform.inverse.matrix, modelMatrix);
-        if (isLabLoaded()) {
+        if (!useAR && isLabLoaded()) {
             if (!labModelMatrix) buildLabMatrix();
             gl.disable(gl.BLEND);
             gl.enable(gl.DEPTH_TEST);
@@ -504,7 +509,7 @@ function onXRFrame(time, frame) {
         }
         renderVRPanel(view.projectionMatrix, view.transform.inverse.matrix);
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
-        renderHands(gl, frame, xrReferenceSpace, view.projectionMatrix, view.transform.inverse.matrix);
+        if (!useAR) renderHands(gl, frame, xrReferenceSpace, view.projectionMatrix, view.transform.inverse.matrix);
     }
     gl.disable(gl.SCISSOR_TEST);
 }
@@ -539,24 +544,32 @@ function nonVRLoop() {
 // ============================================================================
 async function enterVR() {
     if (xrSession) { xrSession.end(); return; }
+    const btnLabel = useAR ? 'AR' : 'VR';
     try {
-        const session = await navigator.xr.requestSession('immersive-vr', {
-            optionalFeatures: ['hand-tracking']
+        let mode = 'immersive-vr';
+        if (useAR) {
+            const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+            mode = arSupported ? 'immersive-ar' : 'immersive-vr';
+            if (!arSupported) console.warn('immersive-ar not supported, falling back to immersive-vr');
+        }
+        const session = await navigator.xr.requestSession(mode, {
+            optionalFeatures: ['hand-tracking', ...(mode === 'immersive-ar' ? ['dom-overlay'] : [])],
+            ...(mode === 'immersive-ar' ? { domOverlay: { root: document.body } } : {}),
         });
         xrSession = session;
         setupControllerInput(session);
         session.addEventListener('end', () => {
             xrSession = null; xrReferenceSpace = null;
-            document.getElementById('vr-button').textContent = 'Enter VR';
+            document.getElementById('vr-button').textContent = `Enter ${btnLabel}`;
         });
         await gl.makeXRCompatible();
         await session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
         xrReferenceSpace = await session.requestReferenceSpace('local');
-        document.getElementById('vr-button').textContent = 'Exit VR';
+        document.getElementById('vr-button').textContent = `Exit ${btnLabel}`;
         session.requestAnimationFrame(onXRFrame);
     } catch (e) {
-        console.error('VR error:', e);
-        document.getElementById('status').textContent = `VR error: ${e.message}`;
+        console.error(`${btnLabel} error:`, e);
+        document.getElementById('status').textContent = `${btnLabel} error: ${e.message}`;
     }
 }
 
@@ -590,11 +603,14 @@ window.addEventListener('load', () => {
 
     statusDiv.textContent = 'Ready';
 
-    // load lab model in background — doesn't block VR entry
-    const LAB_URL = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
-    fetchWithProgress('Lab environment', LAB_URL)
-        .then(buf => loadLabModel(gl, buf))
-        .catch(e => console.warn('Lab model unavailable:', e));
+
+    // maybe we want this for both ar and vr? something to keep in mind.
+    if (!useAR) {
+        const LAB_URL = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
+        fetchWithProgress('Lab environment', LAB_URL)
+            .then(buf => loadLabModel(gl, buf))
+            .catch(e => console.warn('Lab model unavailable:', e));
+    }
 
     vrBtn.addEventListener('click', async () => {
         if (xrSession) { xrSession.end(); return; }
@@ -663,12 +679,12 @@ window.addEventListener('load', () => {
                 console.error('Failed to load structure:', e);
                 statusDiv.textContent = 'Load failed: ' + e.message;
                 vrBtn.disabled = false;
-                vrBtn.textContent = 'Enter VR';
+                vrBtn.textContent = useAR ? 'Enter AR' : 'Enter VR';
                 return;
             }
 
             vrBtn.disabled = false;
-            vrBtn.textContent = 'Enter VR';
+            vrBtn.textContent = useAR ? 'Enter AR' : 'Enter VR';
         }
 
         enterVR();
