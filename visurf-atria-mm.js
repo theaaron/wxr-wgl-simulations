@@ -368,8 +368,8 @@ function updateContinuousAblation(modelMatrix) {
         }
     }
 
-    for (const hand of ['left', 'right']) {
-        const middleRay = getMiddleFingerRay(hand);
+    if (ablationMode || excitationMode) {
+        const middleRay = getMiddleFingerRay('right');
         if (middleRay) {
             const hit = rayMarchSurface(middleRay.origin, middleRay.direction, modelMatrix);
             if (hit && hit.t < 0.05) {
