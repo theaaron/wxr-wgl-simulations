@@ -1,7 +1,4 @@
-// cardiac electrical simulation using GPU texture ping-pong
-// based on the Minimal Model (Bueno-Orovio et al.)
-
-// simulation state
+// cardiac electrical simulation
 let gl = null;
 let initialized = false;
 
@@ -29,6 +26,12 @@ let fbo1 = null;
 let timeStepProgram = null;
 let exciteProgram = null;
 let copyProgram = null;
+let directionatorProgram_0 = null;
+let directionatorProgram_1 = null;
+
+let compressedTexelIndex_gpu = null;
+let dirFBO_0 = null;
+let dirFBO_1 = null;
 
 let quadVAO = null;
 let quadBuffer = null;
@@ -66,7 +69,7 @@ const params = {
 };
 
 let running = false;
-let stepsPerFrame = 20;
+let stepsPerFrame = 5;
 
 const quadVS = `#version 300 es
 layout(location = 0) in vec2 a_position;
@@ -74,6 +77,113 @@ out vec2 cc;
 void main() {
     cc = a_position * 0.5 + 0.5;
     gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+const directionatorCommon = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+precision highp isampler2D;
+precision highp sampler2D;
+
+#define pack(i,j) uint((uint(i) << 16u) + uint(j))
+
+in vec2 cc;
+
+uniform usampler2D fullTexelIndex;
+uniform usampler2D compressedTexelIndex;
+uniform sampler2D  ablationMap;
+uniform int        mx, my;
+
+ivec2 getIJ(ivec3 idx, ivec3 size) {
+    int si = idx.z % mx;
+    int sj = idx.z / mx;
+    return ivec2(size.x * si + idx.x, (my - 1 - sj) * size.y + idx.y);
+}
+
+ivec3 getIdx(ivec2 IJ, ivec3 size) {
+    int si = IJ.x / size.x;
+    int sj = (my - 1) - (IJ.y / size.y);
+    return ivec3(IJ.x % size.x, IJ.y % size.y, mx * sj + si);
+}
+
+bool texelInDomain(ivec3 v, ivec3 size) {
+    return texelFetch(compressedTexelIndex, getIJ(v, size), 0).a == uint(1);
+}
+
+bool isInBounds(ivec3 v, ivec3 size) {
+    return all(greaterThanEqual(v, ivec3(0))) && all(lessThan(v, size));
+}
+
+ivec2 getTargetIndex(ivec3 v, ivec3 size) {
+    return ivec2(texelFetch(compressedTexelIndex, getIJ(v, size), 0).xy);
+}
+
+bool isAblated(ivec3 v, ivec3 size) {
+    return texelFetch(ablationMap, getTargetIndex(v, size), 0).r > 0.5;
+}
+
+bool isNotGood(ivec3 v, ivec3 size) {
+    return !(isInBounds(v, size) && texelInDomain(v, size)) || isAblated(v, size);
+}
+
+uint getPackedIndex(ivec3 C, ivec3 D, ivec3 size) {
+    ivec3 pt = C + D;
+    if (isNotGood(pt, size)) {
+        pt = C - D;
+        if (isNotGood(pt, size)) pt = C;
+    }
+    uvec2 t = texelFetch(compressedTexelIndex, getIJ(pt, size), 0).xy;
+    return pack(t.x, t.y);
+}
+`;
+
+const directionatorFS_0 = directionatorCommon + `
+layout(location = 0) out uvec4 odir0;
+void main() {
+    ivec2 compSize = textureSize(fullTexelIndex, 0);
+    ivec2 fullSize = textureSize(compressedTexelIndex, 0);
+    ivec3 size = ivec3(fullSize.x / mx, fullSize.y / my, mx * my);
+
+    ivec2 texelPos = ivec2(cc * vec2(compSize));
+    ivec4 fullIndex = ivec4(texelFetch(fullTexelIndex, texelPos, 0));
+    if (fullIndex.a != 1) { odir0 = uvec4(0u); return; }
+
+    ivec3 cidx = getIdx(fullIndex.xy, size);
+    if (isAblated(cidx, size)) { odir0 = uvec4(0u); return; }
+
+    ivec3 ii = ivec3(1, 0, 0);
+    ivec3 jj = ivec3(0, 1, 0);
+
+    odir0 = uvec4(
+        getPackedIndex(cidx,  jj, size),
+        getPackedIndex(cidx, -jj, size),
+        getPackedIndex(cidx,  ii, size),
+        getPackedIndex(cidx, -ii, size)
+    );
+}`;
+
+const directionatorFS_1 = directionatorCommon + `
+layout(location = 0) out uvec4 odir1;
+void main() {
+    ivec2 compSize = textureSize(fullTexelIndex, 0);
+    ivec2 fullSize = textureSize(compressedTexelIndex, 0);
+    ivec3 size = ivec3(fullSize.x / mx, fullSize.y / my, mx * my);
+
+    ivec2 texelPos = ivec2(cc * vec2(compSize));
+    ivec4 fullIndex = ivec4(texelFetch(fullTexelIndex, texelPos, 0));
+    if (fullIndex.a != 1) { odir1 = uvec4(0u); return; }
+
+    ivec3 cidx = getIdx(fullIndex.xy, size);
+    if (isAblated(cidx, size)) { odir1 = uvec4(0u); return; }
+
+    ivec3 kk = ivec3(0, 0, 1);
+
+    odir1 = uvec4(
+        getPackedIndex(cidx,  kk, size),
+        getPackedIndex(cidx, -kk, size),
+        0u, 0u
+    );
 }`;
 
 
@@ -222,11 +332,8 @@ void main() {
     
     vec4 color0 = texelFetch(icolor0, texelPos, 0);
     
-    // get full texture coords from fullTexelIndex (which is in compressed space)
     uvec4 fullIdx = texelFetch(fullTexelIndex, texelPos, 0);
     
-    // fullIdx.xy contains the position in the full texture atlas
-    // fullIdx.z = inDomain, fullIdx.w = valid
     if (fullIdx.w != uint(1)) {
         ocolor0 = color0;
         return;
@@ -333,7 +440,8 @@ function createTextures(rawData) {
     );
     
     compressedDataCPU = buildCompressedTexelIndexCPU(rawData);
-    
+    compressedTexelIndex_gpu = createUint32TextureWithData(fullWidth, fullHeight, compressedDataCPU);
+
     const initData = new Float32Array(compWidth * compHeight * 4);
     for (let i = 0; i < compWidth * compHeight; i++) {
         initData[i * 4 + 0] = 0.0;   // U
@@ -349,7 +457,24 @@ function createTextures(rawData) {
     
     fbo0 = createFBO(scolor0);
     fbo1 = createFBO(fcolor0);
-    
+
+    dirFBO_0 = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dirFBO_0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dir0, 0);
+    const dirFBO0Status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (dirFBO0Status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('[directionator] dirFBO_0 incomplete:', dirFBO0Status);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    dirFBO_1 = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dirFBO_1);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dir1, 0);
+    const dirFBO1Status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (dirFBO1Status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('[directionator] dirFBO_1 incomplete:', dirFBO1Status);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
 function buildCompressedTexelIndexCPU(rawData) {
@@ -456,6 +581,44 @@ function runDirectionatorCPU(rawData) {
     console.log('Cardiac directionator computed CPU-side');
 }
 
+function runDirectionatorPass(program, fbo, ablationTex) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, compWidth, compHeight);
+    gl.useProgram(program);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, fullTexelIndex);
+    gl.uniform1i(gl.getUniformLocation(program, 'fullTexelIndex'), 0);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, compressedTexelIndex_gpu);
+    gl.uniform1i(gl.getUniformLocation(program, 'compressedTexelIndex'), 1);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, ablationTex);
+    gl.uniform1i(gl.getUniformLocation(program, 'ablationMap'), 2);
+
+    gl.uniform1i(gl.getUniformLocation(program, 'mx'), mx);
+    gl.uniform1i(gl.getUniformLocation(program, 'my'), my);
+
+    gl.bindVertexArray(quadVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+export function runDirectionator(ablationTex) {
+    if (!directionatorProgram_0 || !directionatorProgram_1 || !dirFBO_0 || !dirFBO_1 || !compressedTexelIndex_gpu) {
+        console.warn('[directionator] GPU directionator not ready');
+        return;
+    }
+
+    runDirectionatorPass(directionatorProgram_0, dirFBO_0, ablationTex);
+    runDirectionatorPass(directionatorProgram_1, dirFBO_1, ablationTex);
+}
+
 function createFloat32Texture(width, height) {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -546,12 +709,19 @@ function compilePrograms() {
     timeStepProgram = createProgram(quadVS, timeStepFS);
     exciteProgram = createProgram(quadVS, exciteFS);
     copyProgram = createProgram(quadVS, copyFS);
-    
+    directionatorProgram_0 = createProgram(quadVS, directionatorFS_0);
+    directionatorProgram_1 = createProgram(quadVS, directionatorFS_1);
+
     if (!timeStepProgram || !exciteProgram || !copyProgram) {
         console.error('Failed to compile cardiac simulation shaders');
         return false;
     }
-    
+    if (!directionatorProgram_0 || !directionatorProgram_1) {
+        console.warn('[directionator] GPU directionator shader failed to compile — ablation re-run unavailable');
+    } else {
+        console.log('[directionator] GPU directionator compiled OK (2-pass)');
+    }
+
     return true;
 }
 
@@ -577,7 +747,6 @@ function runTimeStep() {
     gl.bindTexture(gl.TEXTURE_2D, dir1);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'idir1'), 2);
 
-    // ablation hook — bind ablation map (or a null-safe fallback) to unit 3
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, ablationTexture || null);
     gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'ablationMap'), 3);

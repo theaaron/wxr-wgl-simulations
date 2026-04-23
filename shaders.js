@@ -730,7 +730,7 @@ out vec3  v_E;
 out float v_voltage;
 out float v_useVoltage;
 out float v_cut;
-out float v_ablated;
+flat out float v_ablated;
 
 void main() {
     ivec2 voxIdx = ivec2(a_compIdx);
@@ -767,7 +767,7 @@ in vec3  v_E;
 in float v_voltage;
 in float v_useVoltage;
 in float v_cut;
-in float v_ablated;
+flat in float v_ablated;
 
 uniform vec3  u_lightDirection;
 uniform vec4  u_lightColor;
@@ -777,6 +777,7 @@ uniform vec4  u_materialColor;
 uniform float u_materialAmbientTerm;
 uniform float u_materialSpecularTerm;
 uniform float u_shininess;
+uniform bool  u_simRunning;
 
 out vec4 fragColor;
 
@@ -791,8 +792,8 @@ vec3 jetColor(float t) {
 void main() {
     if (v_cut > 0.5) discard;
 
-    // ablated tissue bypasses voltage coloring, just giving it a dark gray color. 
-    if (v_ablated > 0.5) {
+    // ablated tissue shows a dark gray marker only during setup (not while sim is running)
+    if (v_ablated > 0.5 && !u_simRunning) {
         fragColor = vec4(0.25, 0.2, 0.2, 1.0);
         return;
     }

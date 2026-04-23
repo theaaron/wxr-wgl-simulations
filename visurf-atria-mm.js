@@ -353,7 +353,7 @@ function updateContinuousExcitation(modelMatrix) {
     }
 }
 
-const ablateRadius = 3;
+const ablateRadius = 6;
 
 function updateContinuousAblation(modelMatrix) {
     if (!structure) return;
@@ -441,6 +441,8 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, getAblationTexture() || posTex);
     gl.uniform1i(gl.getUniformLocation(surfProg, 'u_ablationTex'), 3);
+
+    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_simRunning'), simRunning ? 1 : 0);
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);

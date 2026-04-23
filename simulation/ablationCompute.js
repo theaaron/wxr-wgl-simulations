@@ -1,4 +1,6 @@
-// ablationCompute.js 
+// ablationCompute.js — ablation module
+
+import { runDirectionator } from './cardiacCompute.js';
 
 let gl = null;
 let ablationTex = null;
@@ -210,6 +212,8 @@ export function ablateAt(x, y, z, radius = 4) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     _copyToMain();
+
+    runDirectionator(ablationTex);
 }
 
 function _copyToMain() {
