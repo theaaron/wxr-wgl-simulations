@@ -607,7 +607,7 @@ async function enterVR() {
         });
         await gl.makeXRCompatible();
         await session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-        xrReferenceSpace = await session.requestReferenceSpace('local-floor');
+        xrReferenceSpace = await session.requestReferenceSpace('local');
         document.getElementById('vr-button').textContent = `Exit ${btnLabel}`;
         session.requestAnimationFrame(onXRFrame);
     } catch (e) {
