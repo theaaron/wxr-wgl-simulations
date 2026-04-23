@@ -1,5 +1,4 @@
 // vr controller input and ray visualization
-import { pickVoxel } from './renderStructure.js';
 import { triggerPanelButton, isHoveringPanel, rayIntersectsPanel } from './vrPanel.js';
 
 let exciteCallback = null;
@@ -743,7 +742,6 @@ export function renderControllerRays(gl, projectionMatrix, viewMatrix) {
     }
 }
 
-// Render the VR UI button panel
 export function renderVRButton(gl, projectionMatrix, viewMatrix) {
     if (!vrButtonProgram || !vrButtonBuffer) return;
 
@@ -801,19 +799,11 @@ export function updateStructureManipulation() {
     if (!grabState.structureAtGrab) return;
 
     if (leftGrab && rightGrab && leftController && rightController) {
-        // two-handed: translate + rotate + scale
+        // two-handed: rotate + scale only (no translate)
         const currentDistance = getHandDistance();
         const scaleFactor = currentDistance / grabState.initialHandDistance;
-        structureTransform.scale = grabState.structureAtGrab.scale * scaleFactor;
+        structureTransform.scale = Math.min(Math.max(grabState.structureAtGrab.scale * scaleFactor, 0.05), 0.8);
 
-        const currentMidpoint = getHandMidpoint();
-        structureTransform.position = [
-            grabState.structureAtGrab.position[0] + (currentMidpoint[0] - grabState.midpointAtGrab[0]),
-            grabState.structureAtGrab.position[1] + (currentMidpoint[1] - grabState.midpointAtGrab[1]),
-            grabState.structureAtGrab.position[2] + (currentMidpoint[2] - grabState.midpointAtGrab[2])
-        ];
-
-        // rotation from hand vector change
         const grabVec = [
             grabState.rightMatrixAtGrab[12] - grabState.leftMatrixAtGrab[12],
             grabState.rightMatrixAtGrab[13] - grabState.leftMatrixAtGrab[13],
@@ -828,7 +818,6 @@ export function updateStructureManipulation() {
         structureTransform.rotation = multiplyMat4(rotMatrix, grabState.structureAtGrab.rotation);
 
     } else {
-        // one-handed: translate + rotate, pivoting around hand
         const controller = leftGrab ? leftController : rightController;
         const matrixAtGrab = leftGrab ? grabState.leftMatrixAtGrab : grabState.rightMatrixAtGrab;
 
@@ -836,16 +825,6 @@ export function updateStructureManipulation() {
 
         const deltaMatrix = multiplyMat4(controller.matrix, invertMat4(matrixAtGrab));
         const deltaRot = extractRotation(deltaMatrix);
-
-        // rotate the offset from hand to structure, then add to current hand position
-        const offset = grabState.structureOffsetAtGrab || [0, 0, 0];
-        const rotatedOffset = transformVec3(deltaRot, offset);
-
-        structureTransform.position = [
-            controller.origin.x + rotatedOffset[0],
-            controller.origin.y + rotatedOffset[1],
-            controller.origin.z + rotatedOffset[2]
-        ];
 
         structureTransform.rotation = multiplyMat4(deltaRot, grabState.structureAtGrab.rotation);
     }
