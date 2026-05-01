@@ -1,5 +1,5 @@
 // vr controller input and ray visualization
-import { triggerPanelButton, isHoveringPanel, rayIntersectsPanel } from './vrPanel.js';
+import { triggerPanelButton, isHoveringPanel, rayIntersectsPanel, rayHitsPanelTablet } from './vrPanel.js';
 
 let exciteCallback = null;
 
@@ -91,6 +91,8 @@ let grabState = {
     initialHandDistance: null,
     midpointAtGrab: null
 };
+
+const gripHeld = { left: false, right: false };
 
 const RAY_VS = `#version 300 es
 in vec3 a_position;
@@ -296,8 +298,7 @@ function onSelect(event) {
 
     if (inputSource.targetRayMode === 'tracked-pointer') {
         const hand = inputSource.handedness;
-        const isGrabbing = (hand === 'left' && grabState.leftGrabbing) ||
-            (hand === 'right' && grabState.rightGrabbing);
+        const holdsGrip = (hand === 'left' ? gripHeld.left : gripHeld.right);
 
         if (isHoveringPanel()) {
             triggerPanelButton();
@@ -306,15 +307,13 @@ function onSelect(event) {
 
         if (excitationModeActive) return;
 
-        if (isGrabbing && exciteCallback) {
-            // grip + trigger = excite at ray intersection
+        if (holdsGrip && exciteCallback) {
             if (hand === 'left' && leftController) {
                 requestExciteAtRay(leftController);
             } else if (hand === 'right' && rightController) {
                 requestExciteAtRay(rightController);
             }
         } else {
-            // trigger only = pick voxel
             if (hand === 'left' && leftController) {
                 performGPUPick(leftController);
             } else if (hand === 'right' && rightController) {
@@ -332,7 +331,6 @@ function requestExciteAtRay(controller) {
     }
 }
 
-// per-controller trigger-held state for continuous excitation
 const triggerHeld = { left: false, right: false };
 
 export function isTriggerHeld(handedness) {
@@ -356,12 +354,21 @@ function onSqueeze(event) { }
 function onSqueezeStart(event) {
     if (event.inputSource.hand) return;
     const hand = event.inputSource.handedness;
+    if (hand !== 'left' && hand !== 'right') return;
 
-    if (hand === 'left' && leftController) {
+    if (hand === 'left') gripHeld.left = true;
+    else gripHeld.right = true;
+
+    const ctrl = hand === 'left' ? leftController : rightController;
+    const squeezingTablet = ctrl && !ctrl.isHand &&
+        rayHitsPanelTablet(ctrl.origin, ctrl.direction);
+    if (squeezingTablet) return;
+
+    if (hand === 'left' && leftController && !leftController.isHand) {
         grabState.leftGrabbing = true;
         grabState.leftMatrixAtGrab = new Float32Array(leftController.matrix);
         grabState.leftGrabPoint = [leftController.origin.x, leftController.origin.y, leftController.origin.z];
-    } else if (hand === 'right' && rightController) {
+    } else if (hand === 'right' && rightController && !rightController.isHand) {
         grabState.rightGrabbing = true;
         grabState.rightMatrixAtGrab = new Float32Array(rightController.matrix);
         grabState.rightGrabPoint = [rightController.origin.x, rightController.origin.y, rightController.origin.z];
@@ -378,10 +385,9 @@ function onSqueezeStart(event) {
         scale: structureTransform.scale
     };
 
-    // store offset from controller to structure at grab time
-    const grabPoint = grabState.leftGrabbing ?
-        (grabState.leftGrabPoint || [0, 0, 0]) :
-        (grabState.rightGrabPoint || [0, 0, 0]);
+    const grabPoint = grabState.leftGrabbing
+        ? (grabState.leftGrabPoint || [0, 0, 0])
+        : (grabState.rightGrabPoint || [0, 0, 0]);
     grabState.structureOffsetAtGrab = [
         structureTransform.position[0] - grabPoint[0],
         structureTransform.position[1] - grabPoint[1],
@@ -392,8 +398,13 @@ function onSqueezeStart(event) {
 function onSqueezeEnd(event) {
     if (event.inputSource.hand) return;
     const hand = event.inputSource.handedness;
-    if (hand === 'left') grabState.leftGrabbing = false;
-    else if (hand === 'right') grabState.rightGrabbing = false;
+    if (hand === 'left') {
+        gripHeld.left = false;
+        grabState.leftGrabbing = false;
+    } else if (hand === 'right') {
+        gripHeld.right = false;
+        grabState.rightGrabbing = false;
+    }
 }
 
 function getHandDistance() {
@@ -1004,7 +1015,6 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
             }
         }
 
-        // pacing: grip + trigger
         if (window.leftControllerExciteRequested) {
             window.leftControllerExciteRequested = false;
             if (lastLeftPick && exciteCallback) {
@@ -1044,7 +1054,6 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
             }
         }
 
-        // pacing: grip + trigger
         if (window.rightControllerExciteRequested) {
             window.rightControllerExciteRequested = false;
             if (lastRightPick && exciteCallback) {
@@ -1074,7 +1083,7 @@ export function getLastRightPick() {
 }
 
 export function isControllerSqueezing(hand) {
-    return hand === 'left' ? grabState.leftGrabbing : grabState.rightGrabbing;
+    return hand === 'left' ? gripHeld.left : gripHeld.right;
 }
 
 export function setControllerHitDistances(leftDist, rightDist) {

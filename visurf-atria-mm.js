@@ -5,7 +5,7 @@ import {
     getStructureModelMatrix, updateStructureManipulation,
     setExciteCallback, getLeftController, getRightController,
     renderControllerRays, setControllerHitDistances, isTriggerHeld,
-    setExcitationActive, resetStructureTransform
+    setExcitationActive, resetStructureTransform, isControllerSqueezing
 } from './rendering/vrControllers.js';
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
@@ -15,7 +15,7 @@ import {
 import {
     updateHandTracking, getFingerRay, getMiddleFingerRay,
     processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching,
-    setGrabCondition
+    setGrabCondition, getHandPinchWorldPoint
 } from './rendering/handTracking.js';
 import { fetchWithProgress } from './loadingProgress.js';
 import { SURF_VS, SURF_FS } from './shaders.js';
@@ -505,8 +505,9 @@ function onXRFrame(time, frame) {
     updatePanelHover(leftCtrl, rightCtrl);
     updatePanelGrab(
         leftCtrl, rightCtrl,
-        false, false,
-        isHandPinching('left'), isHandPinching('right')
+        isControllerSqueezing('left'), isControllerSqueezing('right'),
+        isHandPinching('left'), isHandPinching('right'),
+        getHandPinchWorldPoint('left'), getHandPinchWorldPoint('right')
     );
 
     if (!isPanelGrabbed()) updateStructureManipulation();
@@ -621,14 +622,14 @@ async function enterVR() {
 // ============================================================================
 const ATRIA_PATHS = {
     small: './resources/atria.json',
-    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
-    // large: './resources/atria2.json',
+    // large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
+    large: './resources/atria2.json',
 };
 
 const VENTRICLE_PATHS = {
     small: './resources/ventricle_64x64x64.json',
-    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
-    // large: './resources/13-350um-192x192x192_lrv_grid.json',
+    // large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
+    large: './resources/13-350um-192x192x192_lrv_grid.json',
 };
 
 window.addEventListener('load', () => {

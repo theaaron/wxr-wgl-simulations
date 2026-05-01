@@ -1,4 +1,5 @@
-import { setHandGrabState, updateHandControllerPose, updateStructureManipulation } from './vrControllers.js';
+import { setHandGrabState, updateHandControllerPose } from './vrControllers.js';
+import { pinchMidpointTouchesPanelTablet } from './vrPanel.js';
 
 const PINCH_THRESHOLD = 0.025;
 const PINCH_RELEASE = 0.045;
@@ -26,6 +27,9 @@ export function setGrabCondition(fn) {
 
 let leftFingerRay = null;
 let rightFingerRay = null;
+
+let leftPinchMidWorld = null;
+let rightPinchMidWorld = null;
 let leftMiddleRay = null;
 let rightMiddleRay = null;
 
@@ -89,6 +93,9 @@ function buildFingerMatrix(tipPos, fingerDirection) {
 export function updateHandTracking(frame, referenceSpace) {
     if (!frame || !referenceSpace) return;
 
+    leftPinchMidWorld = null;
+    rightPinchMidWorld = null;
+
     let sawHand = false;
 
     for (const inputSource of frame.session.inputSources) {
@@ -118,6 +125,8 @@ export function updateHandTracking(frame, referenceSpace) {
 
         const wristMatrix = wrist.matrix;
         const pinchOrigin = midpoint(thumbTip, indexTip);
+        if (hand === 'left') leftPinchMidWorld = pinchOrigin;
+        else rightPinchMidWorld = pinchOrigin;
 
         updateHandControllerPose(hand, wristMatrix);
 
@@ -128,6 +137,7 @@ export function updateHandTracking(frame, referenceSpace) {
                 const dx = -wristMatrix[8], dy = -wristMatrix[9], dz = -wristMatrix[10];
                 allowGrab = grabCondition(hand, [wx, wy, wz], [dx, dy, dz]);
             }
+            if (allowGrab && pinchMidpointTouchesPanelTablet(pinchOrigin)) allowGrab = false;
             if (allowGrab) setHandGrabState(hand, true, wristMatrix, pinchOrigin);
         } else if (!pinch && wasPinching) {
             setHandGrabState(hand, false, null, null);
@@ -246,6 +256,10 @@ export function getMiddleFingerRay(hand) {
 
 export function isHandPinching(hand) {
     return hand === 'left' ? leftPinching : rightPinching;
+}
+
+export function getHandPinchWorldPoint(hand) {
+    return hand === 'left' ? leftPinchMidWorld : rightPinchMidWorld;
 }
 
 export function isHandTrackingActive() {

@@ -85,7 +85,6 @@ let panelIndexBuffer = null;
 let buttonBuffer = null;
 let buttonIndexBuffer = null;
 
-// text label textures keyed by button id
 const buttonLabels = {};
 const buttonLabelTextures = {};
 
@@ -157,7 +156,6 @@ void main() {
 }
 `;
 
-// grab bar uses uvs for capsule/pill sdf
 const BAR_VS = `#version 300 es
 in vec3 a_position;
 uniform mat4 u_projectionMatrix;
@@ -277,7 +275,6 @@ function createQuadGeometry() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, panelIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-    // reuse for buttons and bar
     buttonBuffer = panelBuffer;
     buttonIndexBuffer = panelIndexBuffer;
 }
@@ -418,6 +415,24 @@ function hitTestBar(hitX, hitY) {
            Math.abs(hitY - BAR.y) <= BAR.height / 2;
 }
 
+function hitTestTablet(hitX, hitY) {
+    return Math.abs(hitX) <= 0.5 && Math.abs(hitY) <= 0.5;
+}
+
+export function rayHitsPanelTablet(origin, direction) {
+    const hit = rayToLocal(origin, direction);
+    if (!hit) return false;
+    return hitTestTablet(hit.hitX, hit.hitY);
+}
+
+export function pinchMidpointTouchesPanelTablet(worldPos, maxDepthLocal = 0.12) {
+    if (!worldPos) return false;
+    const local = pointToLocal(worldPos);
+    if (!local) return false;
+    if (!hitTestTablet(local[0], local[1])) return false;
+    return Math.abs(local[2]) <= maxDepthLocal;
+}
+
 // ============================================================================
 // ray / poke intersection
 // ============================================================================
@@ -501,14 +516,24 @@ export function isBarHovered() {
 }
 
 // ============================================================================
-// PANEL GRAB (controller squeeze or hand pinch on the bar)
+// PANEL GRAB: controller grip (aiming at full tablet) or hand pinch when midpoint is on the tablet
 // ============================================================================
 
-// call each frame from the main loop. checks if a grab should start, continue, or end based on controller/hand state near the grab bar.
-export function updatePanelGrab(leftCtrl, rightCtrl, leftSqueezing, rightSqueezing, leftPinching, rightPinching) {
+function pinchAnchorWorld(leftPinchWorld, rightPinchWorld, hand) {
+    return hand === 'left' ? leftPinchWorld : rightPinchWorld;
+}
+
+export function updatePanelGrab(
+    leftCtrl, rightCtrl,
+    leftSqueezing, rightSqueezing,
+    leftPinching, rightPinching,
+    pinchWorldLeft = null,
+    pinchWorldRight = null
+) {
     if (panelGrab.active) {
         const hand = panelGrab.hand;
         const ctrl = hand === 'left' ? leftCtrl : rightCtrl;
+        const pinch = pinchAnchorWorld(pinchWorldLeft, pinchWorldRight, hand);
         const stillHolding = hand === 'left'
             ? (leftSqueezing || leftPinching)
             : (rightSqueezing || rightPinching);
@@ -519,18 +544,22 @@ export function updatePanelGrab(leftCtrl, rightCtrl, leftSqueezing, rightSqueezi
             return;
         }
 
+        const pinchMove = !!(ctrl.isHand && (hand === 'left' ? leftPinching : rightPinching) && pinch);
+        const ox = pinchMove ? pinch.x : ctrl.origin.x;
+        const oy = pinchMove ? pinch.y : ctrl.origin.y;
+        const oz = pinchMove ? pinch.z : ctrl.origin.z;
+
         PANEL.position = [
-            ctrl.origin.x + panelGrab.offset[0],
-            ctrl.origin.y + panelGrab.offset[1],
-            ctrl.origin.z + panelGrab.offset[2],
+            ox + panelGrab.offset[0],
+            oy + panelGrab.offset[1],
+            oz + panelGrab.offset[2],
         ];
         return;
     }
 
-    // try to start a grab — check both controller ray hitting bar and hand proximity
     const candidates = [
-        { hand: 'left', ctrl: leftCtrl, squeezing: leftSqueezing, pinching: leftPinching },
-        { hand: 'right', ctrl: rightCtrl, squeezing: rightSqueezing, pinching: rightPinching },
+        { hand: 'left', ctrl: leftCtrl, squeezing: leftSqueezing, pinching: leftPinching, pinch: pinchWorldLeft },
+        { hand: 'right', ctrl: rightCtrl, squeezing: rightSqueezing, pinching: rightPinching, pinch: pinchWorldRight },
     ];
 
     for (const c of candidates) {
@@ -538,31 +567,30 @@ export function updatePanelGrab(leftCtrl, rightCtrl, leftSqueezing, rightSqueezi
         const grabbing = c.squeezing || c.pinching;
         if (!grabbing) continue;
 
-        let nearBar = false;
+        let onTablet = false;
+        let grabAnchor = c.ctrl.origin;
 
-        // controller ray → bar hit test
-        if (c.squeezing) {
+        if (c.squeezing && !c.ctrl.isHand) {
             const hit = rayToLocal(c.ctrl.origin, c.ctrl.direction);
-            if (hit && hitTestBar(hit.hitX, hit.hitY)) nearBar = true;
-        }
-
-        // hand pinch → proximity to bar in world space
-        if (c.pinching && !nearBar) {
-            const local = pointToLocal(c.ctrl.origin);
-            if (local && Math.abs(local[0]) <= BAR.width / 2 + 0.1 &&
-                Math.abs(local[1] - BAR.y) <= 0.15 &&
-                Math.abs(local[2]) <= 0.15) {
-                nearBar = true;
+            if (hit && (hitTestBar(hit.hitX, hit.hitY) || hitTestTablet(hit.hitX, hit.hitY))) {
+                onTablet = true;
+                grabAnchor = c.ctrl.origin;
             }
         }
 
-        if (nearBar) {
+        if (!onTablet && c.pinching && c.pinch &&
+            pinchMidpointTouchesPanelTablet(c.pinch)) {
+            onTablet = true;
+            grabAnchor = c.pinch;
+        }
+
+        if (onTablet) {
             panelGrab.active = true;
             panelGrab.hand = c.hand;
             panelGrab.offset = [
-                PANEL.position[0] - c.ctrl.origin.x,
-                PANEL.position[1] - c.ctrl.origin.y,
-                PANEL.position[2] - c.ctrl.origin.z,
+                PANEL.position[0] - grabAnchor.x,
+                PANEL.position[1] - grabAnchor.y,
+                PANEL.position[2] - grabAnchor.z,
             ];
             return;
         }
