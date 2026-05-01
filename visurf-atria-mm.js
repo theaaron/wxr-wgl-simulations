@@ -10,8 +10,9 @@ import {
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
     fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton,
-    setButtonActive
+    setButtonActive, getPanelModelMatrix, updateButtonLabel
 } from './rendering/vrPanel.js';
+import { initVRHints, updateVRHints, renderVRHints, setHintsEnabled, areHintsEnabled } from './rendering/vrHints.js';
 import {
     updateHandTracking, getFingerRay, getMiddleFingerRay,
     processFingerPanelPoke, consumeFingerPanelPoke, isHandPinching,
@@ -19,7 +20,7 @@ import {
 } from './rendering/handTracking.js';
 import { fetchWithProgress } from './loadingProgress.js';
 import { SURF_VS, SURF_FS } from './shaders.js';
-import { initHandRenderer, renderHands } from './rendering/renderHands.js';
+import { initHandRenderer, renderHands } from './rendering/renderHandsModel.js';
 import {
     initCardiacSimulation, stepSimulation, exciteAt,
     isSimulationWorking, getVoltageTexture, getCompressedCoord,
@@ -27,6 +28,8 @@ import {
     setAblationTexture, getAblationParams
 } from './simulation/cardiacCompute.js';
 import { initAblation, ablateAt, resetAblation, getAblationTexture } from './simulation/ablationCompute.js';
+
+let lastHintFrameTime = null;
 
 // ============================================================================
 // UTILITIES
@@ -475,6 +478,7 @@ function initGL() {
     initVRControllers(gl);
     initVRPanel(gl);
     initHandRenderer(gl);
+    initVRHints(gl);
     return true;
 }
 
@@ -496,6 +500,9 @@ function buildDesktopLabMatrix() {
 function onXRFrame(time, frame) {
     if (!xrSession) return;
     xrSession.requestAnimationFrame(onXRFrame);
+    const dt = lastHintFrameTime !== null ? (time - lastHintFrameTime) / 1000 : 0;
+    lastHintFrameTime = time;
+    updateVRHints(dt, isPanelGrabbed(), isHandPinching('left') && isHandPinching('right'));
     updateControllers(frame, xrReferenceSpace);
     updateHandTracking(frame, xrReferenceSpace);
 
@@ -552,6 +559,10 @@ function onXRFrame(time, frame) {
             renderLab(gl, view.projectionMatrix, view.transform.inverse.matrix, labModelMatrix);
         }
         renderVRPanel(view.projectionMatrix, view.transform.inverse.matrix);
+        renderVRHints(
+            view.projectionMatrix, view.transform.inverse.matrix,
+            getPanelModelMatrix(), getStructureModelMatrix(), surfBoundsCenter
+        );
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
         if (!useAR) renderHands(gl, frame, xrReferenceSpace, view.projectionMatrix, view.transform.inverse.matrix);
     }
@@ -603,7 +614,7 @@ async function enterVR() {
         xrSession = session;
         setupControllerInput(session);
         session.addEventListener('end', () => {
-            xrSession = null; xrReferenceSpace = null;
+            xrSession = null; xrReferenceSpace = null; lastHintFrameTime = null;
             document.getElementById('vr-button').textContent = `Enter ${btnLabel}`;
         });
         await gl.makeXRCompatible();
@@ -711,6 +722,11 @@ window.addEventListener('load', () => {
                     cutX: () => stepCut('x'),
                     cutY: () => stepCut('y'),
                     cutZ: () => stepCut('z'),
+                    toggleHints: () => {
+                        const nowEnabled = !areHintsEnabled();
+                        setHintsEnabled(nowEnabled);
+                        updateButtonLabel('btn_1_2', nowEnabled ? 'Hide Hints' : 'Show Hints');
+                    },
                 });
                 setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
 

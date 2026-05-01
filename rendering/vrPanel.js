@@ -58,6 +58,7 @@ function generateButtons() {
                       : isExcite ? 'toggleExcitationMode'
                       : (r === 0 && c === 2) ? 'toggleAblationMode'
                       : (r === 1 && c === 1) ? 'resetView'
+                      : (r === 1 && c === 2) ? 'toggleHints'
                       : (r === 2 && c === 0) ? 'cutX'
                       : (r === 2 && c === 1) ? 'cutY'
                       : (r === 2 && c === 2) ? 'cutZ'
@@ -242,6 +243,7 @@ export function initVRPanel(glContext) {
     buttonLabels['btn_0_1'] = 'Excite';
     buttonLabels['btn_0_2'] = 'Ablate';
     buttonLabels['btn_1_1'] = 'Reset';
+    buttonLabels['btn_1_2'] = 'Hide Hints';
     buttonLabels['btn_2_0'] = 'Cut X';
     buttonLabels['btn_2_1'] = 'Cut Y';
     buttonLabels['btn_2_2'] = 'Cut Z';
@@ -285,9 +287,14 @@ function createTextTexture(text, w = 256, h = 128) {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = 'white';
-    ctx.font = `bold ${Math.floor(h * 0.48)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    let fontSize = Math.floor(h * 0.48);
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    while (ctx.measureText(text).width > w * 0.92 && fontSize > 8) {
+        fontSize -= 2;
+        ctx.font = `bold ${fontSize}px sans-serif`;
+    }
     ctx.fillText(text, w / 2, h / 2);
 
     const tex = gl.createTexture();
@@ -339,6 +346,12 @@ export function setPanelCallbacks(cbs) {
     }
 }
 
+export function updateButtonLabel(id, text) {
+    if (buttonLabelTextures[id]) gl.deleteTexture(buttonLabelTextures[id]);
+    buttonLabels[id] = text;
+    buttonLabelTextures[id] = createTextTexture(text);
+}
+
 export function setButtonActive(buttonId, active) {
     const btn = BUTTONS[buttonId];
     if (!btn) return;
@@ -354,7 +367,7 @@ export function setButtonActive(buttonId, active) {
 // PANEL TRANSFORM
 // ============================================================================
 
-function getPanelModelMatrix() {
+export function getPanelModelMatrix() {
     const pos = PANEL.position;
     const rot = PANEL.rotation;
     const w = PANEL.width;
