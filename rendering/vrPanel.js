@@ -57,6 +57,7 @@ function generateButtons() {
                 action: isStart  ? 'startSimulation'
                       : isExcite ? 'toggleExcitationMode'
                       : (r === 0 && c === 2) ? 'toggleAblationMode'
+                      : (r === 1 && c === 0) ? 'exitVR'
                       : (r === 1 && c === 1) ? 'resetView'
                       : (r === 1 && c === 2) ? 'toggleHints'
                       : (r === 2 && c === 0) ? 'cutX'
@@ -242,6 +243,7 @@ export function initVRPanel(glContext) {
     buttonLabels['btn_0_0'] = 'Solve';
     buttonLabels['btn_0_1'] = 'Excite';
     buttonLabels['btn_0_2'] = 'Ablate';
+    buttonLabels['btn_1_0'] = 'Exit VR';
     buttonLabels['btn_1_1'] = 'Reset';
     buttonLabels['btn_1_2'] = 'Hide Hints';
     buttonLabels['btn_2_0'] = 'Cut X';

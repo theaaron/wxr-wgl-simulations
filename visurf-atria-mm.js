@@ -716,6 +716,7 @@ window.addEventListener('load', () => {
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
+                    exitVR:               () => { if (xrSession) xrSession.end(); },
                     resetView:            () => { resetStructureTransform(); resetSimulation(); resetAblation(); simRunning = false; },
                     toggleExcitationMode: () => setExcitationMode(!excitationMode),
                     toggleAblationMode:   () => setAblationMode(!ablationMode),
