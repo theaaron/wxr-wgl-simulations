@@ -21,9 +21,25 @@ export function onAllLoaded(callback) {
     allLoadedCallback = callback;
 }
 
+const CACHE_NAME = 'structures-v1';
+
 export async function fetchWithProgress(name, url) {
     tasks[name] = { loaded: 0, total: 0, done: false };
     render();
+
+    if ('caches' in window) {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(url);
+        if (cached) {
+            const buffer = await cached.arrayBuffer();
+            tasks[name].loaded = buffer.byteLength;
+            tasks[name].total = buffer.byteLength;
+            tasks[name].done = true;
+            render();
+            checkComplete();
+            return buffer;
+        }
+    }
 
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
@@ -34,6 +50,10 @@ export async function fetchWithProgress(name, url) {
 
     if (!response.body || !total) {
         const buffer = await response.arrayBuffer();
+        if ('caches' in window) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(url, new Response(buffer.slice(0)));
+        }
         tasks[name].loaded = buffer.byteLength;
         tasks[name].total = buffer.byteLength;
         tasks[name].done = true;
@@ -60,6 +80,11 @@ export async function fetchWithProgress(name, url) {
     for (const chunk of chunks) {
         combined.set(chunk, offset);
         offset += chunk.length;
+    }
+
+    if ('caches' in window) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(url, new Response(combined.buffer.slice(0)));
     }
 
     tasks[name].done = true;
