@@ -11,7 +11,8 @@ import {
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
     fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton,
-    setButtonActive, getPanelModelMatrix, updateButtonLabel
+    setButtonActive, getPanelModelMatrix, updateButtonLabel, getCutValues,
+    rayUpdateCutPanel
 } from './rendering/vrPanel.js';
 import { initVRHints, updateVRHints, renderVRHints, setHintsEnabled, areHintsEnabled } from './rendering/vrHints.js';
 import {
@@ -29,7 +30,6 @@ import {
     setAblationTexture, getAblationParams
 } from './simulation/cardiacCompute.js';
 import { initAblation, ablateAt, resetAblation, getAblationTexture } from './simulation/ablationCompute.js';
-import { initCutPlanes, updateCutPlanes, renderCutPlanes, getCutValues, checkCutPlaneGrab } from './rendering/cutPlanes.js';
 
 let lastHintFrameTime = null;
 
@@ -475,7 +475,6 @@ function initGL() {
     initVRPanel(gl);
     initHandRenderer(gl);
     initVRHints(gl);
-    initCutPlanes(gl);
     return true;
 }
 
@@ -525,12 +524,17 @@ function onXRFrame(time, frame) {
                 triggerPanelButton(buttonId);
             }
         }
+
+        const ctrl = hand === 'left' ? getLeftController() : getRightController();
+        if (ctrl && !ctrl.isHand && isTriggerHeld(hand)) {
+            const result = rayUpdateCutPanel(ctrl.origin, ctrl.direction);
+            if (result === 'done') triggerPanelButton('btn_done_cut');
+        }
     }
 
     if (simRunning) stepSimulation(getStepsPerFrame());
 
     const modelMatrix = getStructureModelMatrix();
-    updateCutPlanes(modelMatrix);
 
     if (structure) updateContinuousExcitation(modelMatrix);
     if (structure) updateContinuousAblation(modelMatrix);
@@ -550,7 +554,6 @@ function onXRFrame(time, frame) {
         gl.scissor(vp.x, vp.y, vp.width, vp.height);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);
         drawSurface(view.projectionMatrix, view.transform.inverse.matrix, modelMatrix);
-        if (structure) renderCutPlanes(view.projectionMatrix, view.transform.inverse.matrix, modelMatrix);
         if (!useAR && isLabLoaded()) {
             if (!labModelMatrix) buildLabMatrix();
             gl.disable(gl.BLEND);
@@ -700,7 +703,6 @@ window.addEventListener('load', () => {
                 const cx = bestVox.x, cy = bestVox.y, cz = bestVox.z;
 
                 baseGrabCondition = (hand, wristOrigin, wristDir) => {
-                    if (checkCutPlaneGrab(hand)) return false;
                     const m = getStructureModelMatrix();
                     const [bx, by, bz] = surfBoundsCenter;
                     const wCx = m[0]*bx + m[4]*by + m[8]*bz + m[12];
@@ -713,7 +715,7 @@ window.addEventListener('load', () => {
                     return Math.sqrt(dx*dx + dy*dy + dz*dz) < surfBoundsRadius * s * 2.5;
                 };
                 setGrabCondition(baseGrabCondition);
-                setControllerGrabCondition((hand, origin) => !checkCutPlaneGrab(hand, origin));
+                setControllerGrabCondition(null);
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },

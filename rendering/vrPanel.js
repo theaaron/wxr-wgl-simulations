@@ -32,13 +32,13 @@ function generateButtons() {
     const top = 0.5 - p;
     const bottom = -0.5 + LAYOUT.barReserve + p;
 
-    const cols = 3, rows = 2;
+    const cols = 3;
     const btnW = (right - left - (cols - 1) * g) / cols;
-    const btnH = (top - bottom - (rows - 1) * g) / rows;
+    const btnH = (top - bottom - 2 * g) / 3;  // 3-row layout
 
     const buttons = {};
 
-    for (let r = 0; r < rows; r++) {
+    for (let r = 0; r < 2; r++) {
         for (let c = 0; c < cols; c++) {
             const x = left + c * (btnW + g) + btnW / 2;
             const y = top - r * (btnH + g) - btnH / 2;
@@ -60,6 +60,18 @@ function generateButtons() {
             };
         }
     }
+
+    buttons['btn_cut'] = {
+        x: (left + right) / 2,
+        y: top - 2 * (btnH + g) - btnH / 2,
+        width: right - left,
+        height: btnH,
+        color: [0.0, 0.32, 0.56],
+        hoverColor: [0.0, 0.45, 0.75],
+        baseColor: [0.0, 0.32, 0.56],
+        activeColor: [0.7, 0.35, 0.0],
+        action: 'toggleCut',
+    };
 
     return buttons;
 }
@@ -95,6 +107,32 @@ let panelGrab = {
 };
 
 let callbacks = {};
+
+let panelMode = 'normal';
+let cutHovered = null;
+
+const cutState = { x: 1.0, y: 1.0, z: 1.0 };
+const CUT_MIN = 0.02;
+
+const CUT_SLIDERS = [
+    { id: 'x', label: 'X', bgColor: [0.45, 0.08, 0.08], fillColor: [0.85, 0.20, 0.20], handleColor: [1.00, 0.35, 0.35] },
+    { id: 'y', label: 'Y', bgColor: [0.08, 0.40, 0.08], fillColor: [0.20, 0.80, 0.20], handleColor: [0.35, 1.00, 0.35] },
+    { id: 'z', label: 'Z', bgColor: [0.08, 0.12, 0.50], fillColor: [0.20, 0.35, 0.90], handleColor: [0.35, 0.50, 1.00] },
+];
+const CUT_ITEM_H   = 0.19;
+const CUT_ITEM_GAP = 0.02;
+const CUT_TOP_Y    = 0.365;
+const TRACK_X0     = -0.28;
+const TRACK_X1     =  0.44;
+const TRACK_SPAN   = TRACK_X1 - TRACK_X0;
+const TRACK_H      = 0.025;
+const HANDLE_W     = 0.04;
+const HANDLE_H     = 0.12;
+const LABEL_X      = -0.43;
+const LABEL_W      = 0.07;
+const LABEL_H      = CUT_ITEM_H * 0.65;
+
+let cutPanelTextures = {};
 
 // ============================================================================
 // SHADERS
@@ -245,6 +283,13 @@ export function initVRPanel(glContext) {
         buttonLabelTextures[id] = createTextTexture(label);
     }
 
+    buttonLabels['btn_cut'] = 'Cut';
+    buttonLabelTextures['btn_cut'] = createTextTexture('Cut');
+    cutPanelTextures.x_label  = createTextTexture('X',  128, 128);
+    cutPanelTextures.y_label  = createTextTexture('Y',  128, 128);
+    cutPanelTextures.z_label  = createTextTexture('Z',  128, 128);
+    cutPanelTextures.done_btn = createTextTexture('Done');
+
     if (panelProgram && buttonProgram && barProgram && textProgram) {
         console.log('VR Panel initialized');
         return true;
@@ -344,6 +389,10 @@ export function updateButtonLabel(id, text) {
     if (buttonLabelTextures[id]) gl.deleteTexture(buttonLabelTextures[id]);
     buttonLabels[id] = text;
     buttonLabelTextures[id] = createTextTexture(text);
+}
+
+export function getCutValues() {
+    return { x: cutState.x, y: cutState.y, z: cutState.z };
 }
 
 export function setButtonActive(buttonId, active) {
@@ -460,13 +509,46 @@ export function rayIntersectsPanel(origin, direction) {
     return { button, distance: worldDistance };
 }
 
+function sliderItemY(i) { return CUT_TOP_Y - i * (CUT_ITEM_H + CUT_ITEM_GAP); }
+
+export function rayUpdateCutPanel(origin, direction) {
+    if (panelMode !== 'cut') return false;
+    const hit = rayToLocal(origin, direction);
+    if (!hit || Math.abs(hit.hitX) > 0.5 || Math.abs(hit.hitY) > 0.5) return false;
+    for (let i = 0; i < 3; i++) {
+        if (Math.abs(hit.hitY - sliderItemY(i)) <= CUT_ITEM_H / 2) {
+            const id = CUT_SLIDERS[i].id;
+            cutState[id] = Math.max(CUT_MIN, Math.min(1.0, (hit.hitX - TRACK_X0) / TRACK_SPAN));
+            return true;
+        }
+    }
+    const doneY = sliderItemY(3);
+    if (Math.abs(hit.hitY - doneY) <= CUT_ITEM_H / 2 && Math.abs(hit.hitX) <= 0.44)
+        return 'done';
+    return false;
+}
+
+function hitTestCutPanel(hitX, hitY) {
+    for (let i = 0; i < 3; i++) {
+        if (Math.abs(hitY - sliderItemY(i)) <= CUT_ITEM_H / 2) {
+            const id = CUT_SLIDERS[i].id;
+            cutState[id] = Math.max(CUT_MIN, Math.min(1.0, (hitX - TRACK_X0) / TRACK_SPAN));
+            return 'slider_' + id;
+        }
+    }
+    const doneY = sliderItemY(3);
+    if (Math.abs(hitY - doneY) <= CUT_ITEM_H / 2 && Math.abs(hitX) <= 0.44)
+        return 'btn_done_cut';
+    return null;
+}
+
 export function fingerPokePanel(fingerTipPos) {
     const local = pointToLocal(fingerTipPos);
     if (!local) return null;
-
     if (Math.abs(local[2]) > 0.06) return null;
     if (Math.abs(local[0]) > 0.5 || Math.abs(local[1]) > 0.5) return null;
 
+    if (panelMode === 'cut') return hitTestCutPanel(local[0], local[1]);
     return hitTestButton(local[0], local[1]);
 }
 
@@ -477,14 +559,23 @@ export function fingerPokePanel(fingerTipPos) {
 export function updatePanelHover(leftController, rightController) {
     hoveredButton = null;
     barHovered = false;
+    cutHovered = null;
 
     const controllers = [leftController, rightController].filter(Boolean);
     for (const ctrl of controllers) {
         const hit = rayToLocal(ctrl.origin, ctrl.direction);
         if (!hit || Math.abs(hit.hitX) > 0.55 || Math.abs(hit.hitY) > 0.6) continue;
 
-        const btn = hitTestButton(hit.hitX, hit.hitY);
-        if (btn) { hoveredButton = btn; return; }
+        if (panelMode === 'cut') {
+            const doneY = sliderItemY(3);
+            if (Math.abs(hit.hitY - doneY) <= CUT_ITEM_H / 2 && Math.abs(hit.hitX) <= 0.44) {
+                cutHovered = 'done';
+                return;
+            }
+        } else {
+            const btn = hitTestButton(hit.hitX, hit.hitY);
+            if (btn) { hoveredButton = btn; return; }
+        }
 
         if (hitTestBar(hit.hitX, hit.hitY)) { barHovered = true; return; }
     }
@@ -496,10 +587,23 @@ export function updatePanelHover(leftController, rightController) {
 
 export function triggerPanelButton(buttonId) {
     const id = buttonId || hoveredButton;
-    if (!id || !BUTTONS[id]) return false;
+    if (!id) return false;
 
+    if (id === 'btn_done_cut') {
+        panelMode = 'normal';
+        setButtonActive('btn_cut', false);
+        return true;
+    }
+
+    if (!BUTTONS[id]) return false;
     const action = BUTTONS[id].action;
     console.log(`Panel button triggered: ${id}, action=${action}, registered=${!!callbacks[action]}`);
+
+    if (action === 'toggleCut') {
+        panelMode = 'cut';
+        setButtonActive('btn_cut', true);
+        return true;
+    }
 
     if (action && callbacks[action]) {
         callbacks[action]();
@@ -590,8 +694,13 @@ export function updatePanelGrab(
 
         if (!onTablet && c.pinching && c.pinch &&
             pinchMidpointTouchesPanelTablet(c.pinch)) {
-            onTablet = true;
-            grabAnchor = c.pinch;
+            const lp = pointToLocal(c.pinch);
+            const inSliderArea = panelMode === 'cut' && lp &&
+                lp[1] > sliderItemY(3) - CUT_ITEM_H / 2;
+            if (!inSliderArea) {
+                onTablet = true;
+                grabAnchor = c.pinch;
+            }
         }
 
         if (onTablet) {
@@ -636,45 +745,43 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
     bindQuad(panelProgram);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
-    //buttons (3x3 grid)
-    gl.useProgram(buttonProgram);
-    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_projectionMatrix'), false, projectionMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_viewMatrix'), false, viewMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_modelMatrix'), false, modelMatrix);
+    if (panelMode === 'normal') {
+        gl.useProgram(buttonProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_projectionMatrix'), false, projectionMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_viewMatrix'), false, viewMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_modelMatrix'), false, modelMatrix);
+        bindQuad(buttonProgram);
 
-    bindQuad(buttonProgram);
-
-    for (const [id, btn] of Object.entries(BUTTONS)) {
-        const isHov = hoveredButton === id;
-        const color = isHov ? btn.hoverColor : btn.color;
-
-        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [btn.x, btn.y, 0]);
-        gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [btn.width, btn.height]);
-        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), color);
-        gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), isHov ? 1.0 : 0.0);
-
-        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
-    }
-
-    // text labels
-    if (textProgram) {
-        gl.useProgram(textProgram);
-        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_projectionMatrix'), false, projectionMatrix);
-        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_viewMatrix'), false, viewMatrix);
-        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_modelMatrix'), false, modelMatrix);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
-        bindQuad(textProgram);
-
-        for (const [id, tex] of Object.entries(buttonLabelTextures)) {
-            const btn = BUTTONS[id];
-            if (!btn) continue;
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [btn.x, btn.y, 0]);
-            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [btn.width * 0.85, btn.height * 0.55]);
+        for (const [id, btn] of Object.entries(BUTTONS)) {
+            const isHov = hoveredButton === id;
+            const color = isHov ? btn.hoverColor : btn.color;
+            gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [btn.x, btn.y, 0]);
+            gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [btn.width, btn.height]);
+            gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), color);
+            gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), isHov ? 1.0 : 0.0);
             gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
         }
-        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        if (textProgram) {
+            gl.useProgram(textProgram);
+            gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_projectionMatrix'), false, projectionMatrix);
+            gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_viewMatrix'), false, viewMatrix);
+            gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_modelMatrix'), false, modelMatrix);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
+            bindQuad(textProgram);
+            for (const [id, tex] of Object.entries(buttonLabelTextures)) {
+                const btn = BUTTONS[id];
+                if (!btn) continue;
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [btn.x, btn.y, 0]);
+                gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [btn.width * 0.85, btn.height * 0.55]);
+                gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+            }
+            gl.bindTexture(gl.TEXTURE_2D, null);
+        }
+    } else {
+        renderCutPanel(projectionMatrix, viewMatrix, modelMatrix);
     }
 
     // grab bar (capsule / pill)
@@ -692,6 +799,78 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
     gl.disable(gl.BLEND);
+}
+
+function renderCutPanel(projMatrix, viewMatrix, modelMatrix) {
+    const DONE_Y = sliderItemY(3);
+    const trackCenterX = (TRACK_X0 + TRACK_X1) / 2;
+
+    gl.useProgram(buttonProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_projectionMatrix'), false, projMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_viewMatrix'), false, viewMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_modelMatrix'), false, modelMatrix);
+    gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), 0);
+    bindQuad(buttonProgram);
+
+    for (let i = 0; i < 3; i++) {
+        const sl  = CUT_SLIDERS[i];
+        const sy  = sliderItemY(i);
+        const val = cutState[sl.id];
+        const fillW   = val * TRACK_SPAN;
+        const handleX = TRACK_X0 + val * TRACK_SPAN;
+
+        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [trackCenterX, sy, 0]);
+        gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [TRACK_SPAN, TRACK_H]);
+        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), sl.bgColor);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+        if (fillW > 0.001) {
+            gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [TRACK_X0 + fillW / 2, sy, 0.0005]);
+            gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [fillW, TRACK_H]);
+            gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), sl.fillColor);
+            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+        }
+
+        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [handleX, sy, 0.001]);
+        gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [HANDLE_W, HANDLE_H]);
+        gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), sl.handleColor);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    const doneColor = cutHovered === 'done' ? [0.0, 0.45, 0.75] : [0.0, 0.32, 0.56];
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [0, DONE_Y, 0]);
+    gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [TRACK_SPAN + 0.04, CUT_ITEM_H * 0.85]);
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), doneColor);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+    if (textProgram) {
+        gl.useProgram(textProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_projectionMatrix'), false, projMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_viewMatrix'), false, viewMatrix);
+        gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_modelMatrix'), false, modelMatrix);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
+        bindQuad(textProgram);
+
+        const labelKeys = ['x_label', 'y_label', 'z_label'];
+        for (let i = 0; i < 3; i++) {
+            const tex = cutPanelTextures[labelKeys[i]];
+            if (!tex) continue;
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [LABEL_X, sliderItemY(i), 0]);
+            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [LABEL_W, LABEL_H]);
+            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+        }
+
+        const doneTex = cutPanelTextures.done_btn;
+        if (doneTex) {
+            gl.bindTexture(gl.TEXTURE_2D, doneTex);
+            gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [0, DONE_Y, 0]);
+            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [0.35, CUT_ITEM_H * 0.55]);
+            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+        }
+        gl.bindTexture(gl.TEXTURE_2D, null);
+    }
 }
 
 function bindQuad(program) {
