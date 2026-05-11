@@ -1,11 +1,12 @@
 // vr control panel - grid + grab bar.
 
+const _a = 25 * Math.PI / 180, _c = Math.cos(_a), _s = Math.sin(_a);
 const PANEL = {
     position: [-0.5, 0.0, -0.6],
     width: 0.36,
     height: 0.30,
-    rotation: 25 * Math.PI / 180,
     backgroundColor: [0.0, 0.188, 0.341, 0.92],
+    orientMatrix: new Float32Array([_c, 0, -_s, 0,  0, 1, 0, 0,  _s, 0, _c, 0,  0, 0, 0, 1]),
 };
 
 const LAYOUT = {
@@ -89,6 +90,8 @@ let panelGrab = {
     active: false,
     hand: null,
     offset: [0, 0, 0],
+    controllerMatrixAtGrab: null,
+    orientAtGrab: null,
 };
 
 let callbacks = {};
@@ -360,16 +363,14 @@ export function setButtonActive(buttonId, active) {
 
 export function getPanelModelMatrix() {
     const pos = PANEL.position;
-    const rot = PANEL.rotation;
     const w = PANEL.width;
     const h = PANEL.height;
-    const cos = Math.cos(rot);
-    const sin = Math.sin(rot);
+    const R = PANEL.orientMatrix;
 
     return new Float32Array([
-        w * cos, 0, w * -sin, 0,
-        0, h, 0, 0,
-        w * sin, 0, w * cos, 0,
+        R[0]*w, R[1]*w, R[2]*w, 0,
+        R[4]*h, R[5]*h, R[6]*h, 0,
+        R[8]*w, R[9]*w, R[10]*w, 0,
         pos[0], pos[1], pos[2], 1
     ]);
 }
@@ -558,6 +559,11 @@ export function updatePanelGrab(
             oy + panelGrab.offset[1],
             oz + panelGrab.offset[2],
         ];
+
+        if (ctrl.matrix && panelGrab.controllerMatrixAtGrab && panelGrab.orientAtGrab) {
+            const delta = multiplyMat4(ctrl.matrix, invertMatrix(panelGrab.controllerMatrixAtGrab));
+            PANEL.orientMatrix = multiplyMat4(extractRotation(delta), panelGrab.orientAtGrab);
+        }
         return;
     }
 
@@ -596,6 +602,8 @@ export function updatePanelGrab(
                 PANEL.position[1] - grabAnchor.y,
                 PANEL.position[2] - grabAnchor.z,
             ];
+            panelGrab.controllerMatrixAtGrab = new Float32Array(c.ctrl.matrix);
+            panelGrab.orientAtGrab = new Float32Array(PANEL.orientMatrix);
             return;
         }
     }
@@ -744,6 +752,28 @@ function transformPoint(m, v) {
         (m[1] * x + m[5] * y + m[9] * z + m[13]) / w,
         (m[2] * x + m[6] * y + m[10] * z + m[14]) / w
     ];
+}
+
+function multiplyMat4(a, b) {
+    const out = new Float32Array(16);
+    for (let col = 0; col < 4; col++)
+        for (let row = 0; row < 4; row++) {
+            let v = 0;
+            for (let k = 0; k < 4; k++) v += a[k*4+row] * b[col*4+k];
+            out[col*4+row] = v;
+        }
+    return out;
+}
+
+function extractRotation(m) {
+    const out = new Float32Array(16);
+    for (let col = 0; col < 3; col++) {
+        const x = m[col*4], y = m[col*4+1], z = m[col*4+2];
+        const len = Math.sqrt(x*x + y*y + z*z) || 1;
+        out[col*4] = x/len; out[col*4+1] = y/len; out[col*4+2] = z/len;
+    }
+    out[15] = 1;
+    return out;
 }
 
 function transformDirection(m, v) {
