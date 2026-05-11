@@ -271,3 +271,41 @@ button:disabled:hover {
     background: rgba(179, 163, 105, 0.25);
     border-color: var(--gt-gold);
 }
+
+.toggle-group {
+    display: flex;
+    border: 1px solid rgba(179, 163, 105, 0.4);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 40px;
+}
+
+.toggle-group .sel-btn {
+    padding: 12px 36px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--gt-white);
+    font-size: 1rem;
+}
+
+.toggle-group .sel-btn.active {
+    background: var(--gt-gold);
+    color: var(--gt-navy);
+    font-weight: 700;
+}
+
+.toggle-group .sel-btn:hover {
+    background: rgba(179, 163, 105, 0.15);
+    transform: none;
+    box-shadow: none;
+}
+
+.toggle-group .sel-btn.active:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+.toggle-group .sel-btn + .sel-btn {
+    border-left: 1px solid rgba(179, 163, 105, 0.4);
+}
