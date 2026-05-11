@@ -88,7 +88,7 @@ let grabState = {
     rightGrabPoint: null,
     structureAtGrab: null,
     structureOffsetAtGrab: null,
-    initialHandDistance: null,
+    prevHandDistance: null,
     midpointAtGrab: null
 };
 
@@ -819,9 +819,13 @@ export function updateStructureManipulation() {
 
     if (leftGrab && rightGrab && leftController && rightController) {
         // two-handed: rotate + scale only (no translate)
+        const SCALE_SENSITIVITY = 0.6;
         const currentDistance = getHandDistance();
-        const scaleFactor = currentDistance / grabState.initialHandDistance;
-        structureTransform.scale = Math.min(Math.max(grabState.structureAtGrab.scale * scaleFactor, 0.05), 0.8);
+        if (grabState.prevHandDistance > 0.001) {
+            const rawFactor = currentDistance / grabState.prevHandDistance;
+            structureTransform.scale = Math.max(structureTransform.scale * Math.pow(rawFactor, SCALE_SENSITIVITY), 0.05);
+        }
+        grabState.prevHandDistance = currentDistance;
 
         const grabVec = [
             grabState.rightMatrixAtGrab[12] - grabState.leftMatrixAtGrab[12],
@@ -906,7 +910,7 @@ export function setHandGrabState(hand, grabbing, matrix, origin) {
             structureTransform.position[2] - refPt[2]
         ];
         if (grabState.leftGrabbing && grabState.rightGrabbing) {
-            grabState.initialHandDistance = getHandDistance();
+            grabState.prevHandDistance = getHandDistance();
             grabState.midpointAtGrab = getHandMidpoint();
         }
     }
