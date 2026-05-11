@@ -15,7 +15,7 @@ export function setExcitationActive(active) {
 const RAY_LENGTH = 5.0;
 const RAY_COLOR = [0.5, 0.5, 0.5];
 const RAY_HIT_COLOR = [0.0, 1.0, 0.0];
-const RAY_BUTTON_HIT_COLOR = [1.0, 0.8, 0.0]; // gold when hovering button
+const RAY_BUTTON_HIT_COLOR = [1.0, 0.8, 0.0];
 const RAY_RADIUS = 0.005;
 const RAY_SEGMENTS = 8;
 
@@ -93,6 +93,9 @@ let grabState = {
 };
 
 const gripHeld = { left: false, right: false };
+
+let controllerGrabCondition = null;
+export function setControllerGrabCondition(fn) { controllerGrabCondition = fn; }
 
 const RAY_VS = `#version 300 es
 in vec3 a_position;
@@ -363,6 +366,11 @@ function onSqueezeStart(event) {
     const squeezingTablet = ctrl && !ctrl.isHand &&
         rayHitsPanelTablet(ctrl.origin, ctrl.direction);
     if (squeezingTablet) return;
+
+    if (controllerGrabCondition && ctrl) {
+        const origin = [ctrl.origin.x, ctrl.origin.y, ctrl.origin.z];
+        if (!controllerGrabCondition(hand, origin)) return;
+    }
 
     if (hand === 'left' && leftController && !leftController.isHand) {
         grabState.leftGrabbing = true;
@@ -847,7 +855,6 @@ export function getStructureModelMatrix() {
     const rot = structureTransform.rotation;
     const s = structureTransform.scale;
 
-    // scale the rotation part
     m[0] = rot[0] * s; m[1] = rot[1] * s; m[2] = rot[2] * s; m[3] = 0;
     m[4] = rot[4] * s; m[5] = rot[5] * s; m[6] = rot[6] * s; m[7] = 0;
     m[8] = rot[8] * s; m[9] = rot[9] * s; m[10] = rot[10] * s; m[11] = 0;
@@ -929,11 +936,11 @@ function multiplyMat4(a, b) {
 
 function invertMat4(m) {
     const out = new Float32Array(16);
-    // transpose rotation
+
     out[0] = m[0]; out[1] = m[4]; out[2] = m[8]; out[3] = 0;
     out[4] = m[1]; out[5] = m[5]; out[6] = m[9]; out[7] = 0;
     out[8] = m[2]; out[9] = m[6]; out[10] = m[10]; out[11] = 0;
-    // transform translation
+
     const tx = -m[12], ty = -m[13], tz = -m[14];
     out[12] = tx * out[0] + ty * out[4] + tz * out[8];
     out[13] = tx * out[1] + ty * out[5] + tz * out[9];
@@ -962,7 +969,6 @@ function transformVec3(m, v) {
 function rotationBetweenVectors(from, to) {
     const out = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
-    // normalize
     const fromLen = Math.sqrt(from[0] * from[0] + from[1] * from[1] + from[2] * from[2]);
     const toLen = Math.sqrt(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
     if (fromLen < 0.0001 || toLen < 0.0001) return out;
@@ -970,7 +976,6 @@ function rotationBetweenVectors(from, to) {
     const fx = from[0] / fromLen, fy = from[1] / fromLen, fz = from[2] / fromLen;
     const tx = to[0] / toLen, ty = to[1] / toLen, tz = to[2] / toLen;
 
-    // cross product for axis
     const cx = fy * tz - fz * ty;
     const cy = fz * tx - fx * tz;
     const cz = fx * ty - fy * tx;
@@ -1006,7 +1011,7 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
             if (lastLeftPick && window.addPickedVoxel) {
                 window.addPickedVoxel(lastLeftPick.instanceID);
                 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                console.log('🎮 LEFT CONTROLLER PICKED VOXEL:');
+                console.log('   LEFT CONTROLLER PICKED VOXEL:');
                 console.log(`   Instance ID: ${lastLeftPick.instanceID}`);
                 console.log(`   Grid Coordinates: (${lastLeftPick.x}, ${lastLeftPick.y}, ${lastLeftPick.z})`);
                 console.log(`   World Position: (${lastLeftPick.worldX.toFixed(3)}, ${lastLeftPick.worldY.toFixed(3)}, ${lastLeftPick.worldZ.toFixed(3)})`);
@@ -1045,7 +1050,7 @@ export function checkAndProcessPicks(gl, cubeBuffer, indexBuffer, modelMatrix, p
             if (lastRightPick && window.addPickedVoxel) {
                 window.addPickedVoxel(lastRightPick.instanceID);
                 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                console.log('🎮 RIGHT CONTROLLER PICKED VOXEL:');
+                console.log('   RIGHT CONTROLLER PICKED VOXEL:');
                 console.log(`   Instance ID: ${lastRightPick.instanceID}`);
                 console.log(`   Grid Coordinates: (${lastRightPick.x}, ${lastRightPick.y}, ${lastRightPick.z})`);
                 console.log(`   World Position: (${lastRightPick.worldX.toFixed(3)}, ${lastRightPick.worldY.toFixed(3)}, ${lastRightPick.worldZ.toFixed(3)})`);

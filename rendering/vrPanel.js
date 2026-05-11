@@ -1,4 +1,4 @@
-// vr control panel — 3x3 grid + grab bar
+// vr control panel - grid + grab bar.
 
 const PANEL = {
     position: [-0.5, 0.0, -0.6],
@@ -31,7 +31,7 @@ function generateButtons() {
     const top = 0.5 - p;
     const bottom = -0.5 + LAYOUT.barReserve + p;
 
-    const cols = 3, rows = 3;
+    const cols = 3, rows = 2;
     const btnW = (right - left - (cols - 1) * g) / cols;
     const btnH = (top - bottom - (rows - 1) * g) / rows;
 
@@ -43,15 +43,10 @@ function generateButtons() {
             const y = top - r * (btnH + g) - btnH / 2;
             const isStart  = r === 0 && c === 0;
             const isExcite = r === 0 && c === 1;
-            const isCut    = r === 2;
             buttons[`btn_${r}_${c}`] = {
                 x, y, width: btnW, height: btnH,
-                color: (isStart || isCut) ? [0.2, 0.4, 0.8]
-                     : isExcite           ? [0.0, 0.32, 0.56]
-                     :                     [0.0, 0.32, 0.56],
-                hoverColor: (isStart || isCut) ? [0.35, 0.55, 0.95]
-                           : isExcite           ? [0.0,  0.45, 0.75]
-                           :                     [0.0,  0.45, 0.75],
+                color:      isStart ? [0.2, 0.4, 0.8] : [0.0, 0.32, 0.56],
+                hoverColor: isStart ? [0.35, 0.55, 0.95] : [0.0, 0.45, 0.75],
                 baseColor: [0.0, 0.32, 0.56],
                 activeColor: [0.7, 0.35, 0.0],
                 action: isStart  ? 'startSimulation'
@@ -60,9 +55,6 @@ function generateButtons() {
                       : (r === 1 && c === 0) ? 'exitVR'
                       : (r === 1 && c === 1) ? 'resetView'
                       : (r === 1 && c === 2) ? 'toggleHints'
-                      : (r === 2 && c === 0) ? 'cutX'
-                      : (r === 2 && c === 1) ? 'cutY'
-                      : (r === 2 && c === 2) ? 'cutZ'
                       : null,
             };
         }
@@ -246,19 +238,16 @@ export function initVRPanel(glContext) {
     buttonLabels['btn_1_0'] = 'Exit VR';
     buttonLabels['btn_1_1'] = 'Reset';
     buttonLabels['btn_1_2'] = 'Hide Hints';
-    buttonLabels['btn_2_0'] = 'Cut X';
-    buttonLabels['btn_2_1'] = 'Cut Y';
-    buttonLabels['btn_2_2'] = 'Cut Z';
     for (const [id, label] of Object.entries(buttonLabels)) {
         buttonLabelTextures[id] = createTextTexture(label);
     }
 
     if (panelProgram && buttonProgram && barProgram && textProgram) {
-        console.log('✅ VR Panel initialized (3×3 grid + grab bar)');
+        console.log('VR Panel initialized');
         return true;
     }
 
-    console.error('❌ Failed to initialize VR Panel');
+    console.error('Failed to initialize VR Panel');
     return false;
 }
 
