@@ -5,7 +5,8 @@ import {
     getStructureModelMatrix, updateStructureManipulation,
     setExciteCallback, getLeftController, getRightController,
     renderControllerRays, setControllerHitDistances, isTriggerHeld,
-    setExcitationActive, resetStructureTransform, isControllerSqueezing
+    setExcitationActive, resetStructureTransform, isControllerSqueezing,
+    setControllerGrabCondition
 } from './rendering/vrControllers.js';
 import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
@@ -28,6 +29,7 @@ import {
     setAblationTexture, getAblationParams
 } from './simulation/cardiacCompute.js';
 import { initAblation, ablateAt, resetAblation, getAblationTexture } from './simulation/ablationCompute.js';
+import { initCutPlanes, updateCutPlanes, renderCutPlanes, getCutValues, checkCutPlaneGrab } from './rendering/cutPlanes.js';
 
 let lastHintFrameTime = null;
 
@@ -136,13 +138,6 @@ let exciteRadius = Math.round(0.05 * surfMaxDim);
 let domainSet = null;
 let domainNx = 0, domainNy = 0, domainNz = 0;
 
-let cutX = 1.0, cutY = 1.0, cutZ = 1.0;
-const CUT_STEP = 0.1;
-function stepCut(axis) {
-    if (axis === 'x') cutX = cutX <= CUT_STEP + 0.001 ? 1.0 : cutX - CUT_STEP;
-    else if (axis === 'y') cutY = cutY <= CUT_STEP + 0.001 ? 1.0 : cutY - CUT_STEP;
-    else if (axis === 'z') cutZ = cutZ <= CUT_STEP + 0.001 ? 1.0 : cutZ - CUT_STEP;
-}
 
 let excitationMode = false;
 let ablationMode = false;
@@ -414,6 +409,7 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_modelMatrix'), false, modelMatrix);
     gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_normalMatrix'), false, nm);
 
+    const { x: cutX, y: cutY, z: cutZ } = getCutValues();
     gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutX'), cutX);
     gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutY'), cutY);
     gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutZ'), cutZ);
@@ -479,6 +475,7 @@ function initGL() {
     initVRPanel(gl);
     initHandRenderer(gl);
     initVRHints(gl);
+    initCutPlanes(gl);
     return true;
 }
 
@@ -533,6 +530,7 @@ function onXRFrame(time, frame) {
     if (simRunning) stepSimulation(getStepsPerFrame());
 
     const modelMatrix = getStructureModelMatrix();
+    updateCutPlanes(modelMatrix);
 
     if (structure) updateContinuousExcitation(modelMatrix);
     if (structure) updateContinuousAblation(modelMatrix);
@@ -552,6 +550,7 @@ function onXRFrame(time, frame) {
         gl.scissor(vp.x, vp.y, vp.width, vp.height);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);
         drawSurface(view.projectionMatrix, view.transform.inverse.matrix, modelMatrix);
+        if (structure) renderCutPlanes(view.projectionMatrix, view.transform.inverse.matrix, modelMatrix);
         if (!useAR && isLabLoaded()) {
             if (!labModelMatrix) buildLabMatrix();
             gl.disable(gl.BLEND);
@@ -633,14 +632,14 @@ async function enterVR() {
 // ============================================================================
 const ATRIA_PATHS = {
     small: './resources/atria.json',
-    // large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
-    large: './resources/atria2.json',
+    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/13-350um-192x192x192_lra_grid.json',
+    // large: './resources/atria2.json',
 };
 
 const VENTRICLE_PATHS = {
     small: './resources/ventricle_64x64x64.json',
-    // large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
-    large: './resources/13-350um-192x192x192_lrv_grid.json',
+    large: 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/05-350um-192x192x192_lrv_grid.json',
+    // large: './resources/13-350um-192x192x192_lrv_grid.json',
 };
 
 window.addEventListener('load', () => {
@@ -701,6 +700,7 @@ window.addEventListener('load', () => {
                 const cx = bestVox.x, cy = bestVox.y, cz = bestVox.z;
 
                 baseGrabCondition = (hand, wristOrigin, wristDir) => {
+                    if (checkCutPlaneGrab(hand)) return false;
                     const m = getStructureModelMatrix();
                     const [bx, by, bz] = surfBoundsCenter;
                     const wCx = m[0]*bx + m[4]*by + m[8]*bz + m[12];
@@ -713,6 +713,7 @@ window.addEventListener('load', () => {
                     return Math.sqrt(dx*dx + dy*dy + dz*dz) < surfBoundsRadius * s * 2.5;
                 };
                 setGrabCondition(baseGrabCondition);
+                setControllerGrabCondition((hand, origin) => !checkCutPlaneGrab(hand, origin));
 
                 setPanelCallbacks({
                     startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
@@ -720,9 +721,6 @@ window.addEventListener('load', () => {
                     resetView:            () => { resetStructureTransform(); resetSimulation(); resetAblation(); simRunning = false; },
                     toggleExcitationMode: () => setExcitationMode(!excitationMode),
                     toggleAblationMode:   () => setAblationMode(!ablationMode),
-                    cutX: () => stepCut('x'),
-                    cutY: () => stepCut('y'),
-                    cutZ: () => stepCut('z'),
                     toggleHints: () => {
                         const nowEnabled = !areHintsEnabled();
                         setHintsEnabled(nowEnabled);
