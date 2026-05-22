@@ -135,6 +135,10 @@ let surfMaxDim = 64;
 
 let exciteRadius = Math.round(0.05 * surfMaxDim);
 
+const TAUBIN_LAMBDA = 0.5;
+const TAUBIN_MU = -0.53;
+const TAUBIN_ITERATIONS = 10;
+
 let domainSet = null;
 let domainNx = 0, domainNy = 0, domainNz = 0;
 
@@ -191,6 +195,101 @@ function computeNormals(struct) {
 }
 
 // ============================================================================
+// TAUBIN SMOOTHING
+// ============================================================================
+function buildTexToIdx(struct) {
+    const ftx = struct.raw.fullTexelIndex;
+    const fw = struct.metadata.fullWidth;
+    const map = new Map();
+    for (let i = 0; i < struct.voxels.length; i++) {
+        map.set(ftx[i * 4 + 1] * fw + ftx[i * 4], i);
+    }
+    return map;
+}
+
+function buildAdjacency(struct, texToIdx) {
+    const idx = struct.raw.boundaryFacets.indices;
+    const fw = struct.metadata.fullWidth;
+    const adj = new Map();
+    for (let t = 0; t < idx.length; t += 6) {
+        const vi0 = texToIdx.get(idx[t+1] * fw + idx[t]);
+        const vi1 = texToIdx.get(idx[t+3] * fw + idx[t+2]);
+        const vi2 = texToIdx.get(idx[t+5] * fw + idx[t+4]);
+        if (vi0 === undefined || vi1 === undefined || vi2 === undefined) continue;
+        if (!adj.has(vi0)) adj.set(vi0, new Set());
+        if (!adj.has(vi1)) adj.set(vi1, new Set());
+        if (!adj.has(vi2)) adj.set(vi2, new Set());
+        adj.get(vi0).add(vi1); adj.get(vi0).add(vi2);
+        adj.get(vi1).add(vi0); adj.get(vi1).add(vi2);
+        adj.get(vi2).add(vi0); adj.get(vi2).add(vi1);
+    }
+    return adj;
+}
+
+function taubinSmooth(posData, adjacency, lambda, mu, iterations) {
+    const src = new Float32Array(posData);
+    const dst = new Float32Array(posData.length);
+
+    function laplacianPass(from, to, weight) {
+        to.set(from);
+        for (const [i, neighbors] of adjacency) {
+            if (neighbors.size === 0) continue;
+            let sx = 0, sy = 0, sz = 0;
+            for (const j of neighbors) { sx += from[j*4]; sy += from[j*4+1]; sz += from[j*4+2]; }
+            const n = neighbors.size;
+            to[i*4]   = from[i*4]   + weight * (sx/n - from[i*4]);
+            to[i*4+1] = from[i*4+1] + weight * (sy/n - from[i*4+1]);
+            to[i*4+2] = from[i*4+2] + weight * (sz/n - from[i*4+2]);
+        }
+    }
+
+    for (let iter = 0; iter < iterations; iter++) {
+        laplacianPass(src, dst, lambda);
+        laplacianPass(dst, src, mu);
+    }
+    return src;
+}
+
+function computeNormalsFromMesh(struct, posData, texToIdx) {
+    const idx = struct.raw.boundaryFacets.indices;
+    const fw = struct.metadata.fullWidth;
+    const { compWidth: cw, compHeight: ch } = struct.metadata;
+    const n = struct.voxels.length;
+    const accum = new Float32Array(n * 3);
+
+    for (let t = 0; t < idx.length; t += 6) {
+        const vi0 = texToIdx.get(idx[t+1] * fw + idx[t]);
+        const vi1 = texToIdx.get(idx[t+3] * fw + idx[t+2]);
+        const vi2 = texToIdx.get(idx[t+5] * fw + idx[t+4]);
+        if (vi0 === undefined || vi1 === undefined || vi2 === undefined) continue;
+
+        const ax = posData[vi0*4], ay = posData[vi0*4+1], az = posData[vi0*4+2];
+        const bx = posData[vi1*4], by = posData[vi1*4+1], bz = posData[vi1*4+2];
+        const cx = posData[vi2*4], cy = posData[vi2*4+1], cz = posData[vi2*4+2];
+
+        const e1x = bx-ax, e1y = by-ay, e1z = bz-az;
+        const e2x = cx-ax, e2y = cy-ay, e2z = cz-az;
+
+        const nx = e1y*e2z - e1z*e2y;
+        const ny = e1z*e2x - e1x*e2z;
+        const nz = e1x*e2y - e1y*e2x;
+
+        accum[vi0*3]+=nx; accum[vi0*3+1]+=ny; accum[vi0*3+2]+=nz;
+        accum[vi1*3]+=nx; accum[vi1*3+1]+=ny; accum[vi1*3+2]+=nz;
+        accum[vi2*3]+=nx; accum[vi2*3+1]+=ny; accum[vi2*3+2]+=nz;
+    }
+
+    const normals = new Float32Array(cw * ch * 4);
+    for (let i = 0; i < n; i++) {
+        let nx = accum[i*3], ny = accum[i*3+1], nz = accum[i*3+2];
+        const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+        if (len > 1e-10) { nx /= len; ny /= len; nz /= len; }
+        normals[i*4]=nx; normals[i*4+1]=ny; normals[i*4+2]=nz; normals[i*4+3]=len>1e-10?1:0;
+    }
+    return normals;
+}
+
+// ============================================================================
 // BUILD SURFACE BUFFERS
 // ============================================================================
 function buildSurfaceBuffers(struct) {
@@ -214,9 +313,12 @@ function buildSurfaceBuffers(struct) {
         posData[i*4+2] = v.z / maxDim;
         posData[i*4+3] = 1.0;
     }
-    posTex = mkF32Tex(cw, ch, posData);
+    const texToIdx = buildTexToIdx(struct);
+    const adjacency = buildAdjacency(struct, texToIdx);
+    const smoothedPos = taubinSmooth(posData, adjacency, TAUBIN_LAMBDA, TAUBIN_MU, TAUBIN_ITERATIONS);
+    posTex = mkF32Tex(cw, ch, smoothedPos);
 
-    const normalData = computeNormals(struct);
+    const normalData = computeNormalsFromMesh(struct, smoothedPos, texToIdx);
     normalTex = mkF32Tex(cw, ch, normalData);
 
     const bf = struct.raw.boundaryFacets;
