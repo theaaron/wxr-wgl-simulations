@@ -386,18 +386,18 @@ function raySphereHit(origin, dir, center, radius) {
     return t > 0.001 ? t : null;
 }
 
+const _voxelOut = { x: 0, y: 0, z: 0 };
 function worldToVoxel(wx, wy, wz, modelMatrix) {
     const m = modelMatrix;
-    const s2 = m[0]*m[0] + m[1]*m[1] + m[2]*m[2]; // scale²
+    const s2 = m[0]*m[0] + m[1]*m[1] + m[2]*m[2];
     const dx = wx - m[12], dy = wy - m[13], dz = wz - m[14];
     const lx = (m[0]*dx + m[1]*dy + m[2]*dz) / s2;
     const ly = (m[4]*dx + m[5]*dy + m[6]*dz) / s2;
     const lz = (m[8]*dx + m[9]*dy + m[10]*dz) / s2;
-    return {
-        x: Math.round((lx / 2 + 0.5) * surfMaxDim),
-        y: Math.round((ly / 2 + 0.5) * surfMaxDim),
-        z: Math.round((lz / 2 + 0.5) * surfMaxDim),
-    };
+    _voxelOut.x = Math.round((lx / 2 + 0.5) * surfMaxDim);
+    _voxelOut.y = Math.round((ly / 2 + 0.5) * surfMaxDim);
+    _voxelOut.z = Math.round((lz / 2 + 0.5) * surfMaxDim);
+    return _voxelOut;
 }
 
 function isDomainVoxel(x, y, z) {
@@ -518,32 +518,19 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.uniform1f(surfLoc.cutY, cutY);
     gl.uniform1f(surfLoc.cutZ, cutZ);
 
-    gl.uniform4f(surfLoc.lightColor, 1, 1, 1, 1);
-    gl.uniform1f(surfLoc.lightAmb,   0.15);
-    gl.uniform1f(surfLoc.lightSpec,  0.5);
-    gl.uniform3fv(surfLoc.lightDir,  LIGHT_DIR);
-    gl.uniform4f(surfLoc.matColor,   0.9, 0.9, 0.9, 1);
-    gl.uniform1f(surfLoc.matAmb,     1.0);
-    gl.uniform1f(surfLoc.matSpec,    0.8);
-    gl.uniform1f(surfLoc.shininess,  12.0);
-
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, posTex);
-    gl.uniform1i(surfLoc.posTex, 0);
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, normalTex);
-    gl.uniform1i(surfLoc.normalTex, 1);
 
     const simOn = isSimulationWorking();
     gl.uniform1i(surfLoc.useSimTex, simOn ? 1 : 0);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, simOn ? getVoltageTexture() : posTex);
-    gl.uniform1i(surfLoc.voltageTex, 2);
 
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, getAblationTexture() || posTex);
-    gl.uniform1i(surfLoc.ablationTex, 3);
 
     gl.uniform1i(surfLoc.simRunning, simRunning ? 1 : 0);
 
@@ -583,6 +570,9 @@ function initGL() {
         cutX:      gl.getUniformLocation(surfProg, 'u_cutX'),
         cutY:      gl.getUniformLocation(surfProg, 'u_cutY'),
         cutZ:      gl.getUniformLocation(surfProg, 'u_cutZ'),
+        useSimTex:     gl.getUniformLocation(surfProg, 'u_useSimTex'),
+        simRunning:    gl.getUniformLocation(surfProg, 'u_simRunning'),
+        // static — set once below, never touched again in draw
         lightColor:    gl.getUniformLocation(surfProg, 'u_lightColor'),
         lightAmb:      gl.getUniformLocation(surfProg, 'u_lightAmbientTerm'),
         lightSpec:     gl.getUniformLocation(surfProg, 'u_lightSpecularTerm'),
@@ -593,11 +583,23 @@ function initGL() {
         shininess:     gl.getUniformLocation(surfProg, 'u_shininess'),
         posTex:        gl.getUniformLocation(surfProg, 'u_posTex'),
         normalTex:     gl.getUniformLocation(surfProg, 'u_normalTex'),
-        useSimTex:     gl.getUniformLocation(surfProg, 'u_useSimTex'),
         voltageTex:    gl.getUniformLocation(surfProg, 'u_voltageTex'),
         ablationTex:   gl.getUniformLocation(surfProg, 'u_ablationTex'),
-        simRunning:    gl.getUniformLocation(surfProg, 'u_simRunning'),
     };
+    gl.useProgram(surfProg);
+    gl.uniform4f(surfLoc.lightColor, 1, 1, 1, 1);
+    gl.uniform1f(surfLoc.lightAmb,   0.15);
+    gl.uniform1f(surfLoc.lightSpec,  0.5);
+    gl.uniform3fv(surfLoc.lightDir,  LIGHT_DIR);
+    gl.uniform4f(surfLoc.matColor,   0.9, 0.9, 0.9, 1);
+    gl.uniform1f(surfLoc.matAmb,     1.0);
+    gl.uniform1f(surfLoc.matSpec,    0.8);
+    gl.uniform1f(surfLoc.shininess,  12.0);
+    gl.uniform1i(surfLoc.posTex,     0);
+    gl.uniform1i(surfLoc.normalTex,  1);
+    gl.uniform1i(surfLoc.voltageTex, 2);
+    gl.uniform1i(surfLoc.ablationTex, 3);
+    gl.useProgram(null);
     initVRControllers(gl);
     initVRPanel(gl);
     initHandRenderer(gl);
@@ -690,7 +692,7 @@ function onXRFrame(time, frame) {
         renderVRPanel(view.projectionMatrix, view.transform.inverse.matrix);
         renderVRHints(
             view.projectionMatrix, view.transform.inverse.matrix,
-            getPanelModelMatrix(), getStructureModelMatrix(), surfBoundsCenter
+            getPanelModelMatrix(), modelMatrix, surfBoundsCenter
         );
         renderControllerRays(gl, view.projectionMatrix, view.transform.inverse.matrix);
         if (!useAR) renderHands(gl, frame, xrReferenceSpace, view.projectionMatrix, view.transform.inverse.matrix);
