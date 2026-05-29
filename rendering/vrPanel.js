@@ -852,21 +852,24 @@ function renderCutPanel(projMatrix, viewMatrix, modelMatrix) {
         gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
         bindQuad(textProgram);
 
+        const ac = PANEL.height / PANEL.width;
+
         const labelKeys = ['x_label', 'y_label', 'z_label'];
         for (let i = 0; i < 3; i++) {
             const tex = cutPanelTextures[labelKeys[i]];
             if (!tex) continue;
             gl.bindTexture(gl.TEXTURE_2D, tex);
             gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [LABEL_X, sliderItemY(i), 0]);
-            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [LABEL_W, LABEL_H]);
+            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [LABEL_H * ac, LABEL_H]);
             gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
         }
 
         const doneTex = cutPanelTextures.done_btn;
         if (doneTex) {
+            const doneH = CUT_ITEM_H * 0.55;
             gl.bindTexture(gl.TEXTURE_2D, doneTex);
             gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [0, DONE_Y, 0]);
-            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [0.35, CUT_ITEM_H * 0.55]);
+            gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [doneH * 2 * ac, doneH]);
             gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
         }
         gl.bindTexture(gl.TEXTURE_2D, null);
