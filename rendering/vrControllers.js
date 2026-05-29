@@ -910,6 +910,8 @@ export function setHandGrabState(hand, grabbing, matrix, origin) {
             structureTransform.position[2] - refPt[2]
         ];
         if (grabState.leftGrabbing && grabState.rightGrabbing) {
+            if (leftController) grabState.leftMatrixAtGrab = new Float32Array(leftController.matrix);
+            if (rightController) grabState.rightMatrixAtGrab = new Float32Array(rightController.matrix);
             grabState.prevHandDistance = getHandDistance();
             grabState.midpointAtGrab = getHandMidpoint();
         }
