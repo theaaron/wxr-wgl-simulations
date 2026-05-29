@@ -853,8 +853,9 @@ export function updateStructureManipulation() {
     }
 }
 
+const _modelMatOut = new Float32Array(16);
 export function getStructureModelMatrix() {
-    const m = new Float32Array(16);
+    const m = _modelMatOut;
     const pos = structureTransform.position;
     const rot = structureTransform.rotation;
     const s = structureTransform.scale;

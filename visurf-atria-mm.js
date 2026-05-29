@@ -572,7 +572,7 @@ function initGL() {
         cutZ:      gl.getUniformLocation(surfProg, 'u_cutZ'),
         useSimTex:     gl.getUniformLocation(surfProg, 'u_useSimTex'),
         simRunning:    gl.getUniformLocation(surfProg, 'u_simRunning'),
-        // static — set once below, never touched again in draw
+
         lightColor:    gl.getUniformLocation(surfProg, 'u_lightColor'),
         lightAmb:      gl.getUniformLocation(surfProg, 'u_lightAmbientTerm'),
         lightSpec:     gl.getUniformLocation(surfProg, 'u_lightSpecularTerm'),

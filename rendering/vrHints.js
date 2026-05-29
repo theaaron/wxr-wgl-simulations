@@ -162,18 +162,15 @@ function advanceHint(hint, dt, dismissed) {
     }
 }
 
-// Billboard matrix: card always faces the camera.
-// V is the XR view matrix (column-major). Its columns are camera axes in world space.
 function makeBillboardMatrix(V, worldPos) {
     return new Float32Array([
-         V[0],  V[1],  V[2], 0,   // camera right
-         V[4],  V[5],  V[6], 0,   // camera up
-        -V[8], -V[9], -V[10], 0,  // toward camera (negate cam back = cam forward)
+        V[0], V[4], V[8],  0,   // camera right
+        V[1], V[5], V[9],  0,   // camera up
+        V[2], V[6], V[10], 0,   // camera back (toward viewer)
         worldPos[0], worldPos[1], worldPos[2], 1,
     ]);
 }
 
-// Transform panel-local point to world using the panel model matrix.
 function panelLocalToWorld(M, lx, ly, lz) {
     return [
         M[0]*lx + M[4]*ly + M[8]*lz  + M[12],
@@ -198,7 +195,6 @@ function renderOneHint(hint, bbMat, proj, view, cardW, cardH) {
     gl.uniform1f(gl.getUniformLocation(bgProg, 'u_alpha'),    hint.alpha);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
 
-    // Text quad (z+0.001 in VS keeps it in front of the bg)
     gl.useProgram(textProg);
     const posLoc2 = gl.getAttribLocation(textProg, 'a_position');
     gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
@@ -256,8 +252,8 @@ export function initVRHints(glContext) {
     bgProg   = linkProgram(HINT_BG_VS,   HINT_BG_FS,   'HintBG');
     textProg = linkProgram(HINT_TEXT_VS, HINT_TEXT_FS, 'HintText');
 
-    panelHintTex  = createHintTextTexture('Pinch to grab & move');
-    structHintTex = createHintTextTexture('Pinch both hands to scale');
+    panelHintTex  = createHintTextTexture('Pinch thumb & index to grab');
+    structHintTex = createHintTextTexture('Pinch with each hand to scale');
 
     panelHint  = makeHint(() => panelHintTex);
     structHint = makeHint(() => structHintTex);
@@ -288,7 +284,6 @@ export function renderVRHints(projectionMatrix, viewMatrix,
         renderOneHint(panelHint, bbMat, projectionMatrix, viewMatrix, 0.22, 0.07);
     }
 
-    // Structure hint — floats above the structure's bounding sphere
     if (structHint && structHint.alpha > 0.001 && structModelMatrix) {
         const M = structModelMatrix;
         const [bx, by, bz] = surfBoundsCenter;
@@ -296,7 +291,7 @@ export function renderVRHints(projectionMatrix, viewMatrix,
         const wx = M[0]*bx + M[4]*by + M[8]*bz  + M[12];
         const wy = M[1]*bx + M[5]*by + M[9]*bz  + M[13];
         const wz = M[2]*bx + M[6]*by + M[10]*bz + M[14];
-        // Estimate visual radius from scale column magnitude, push hint above it
+
         const scale = Math.sqrt(M[0]*M[0] + M[1]*M[1] + M[2]*M[2]);
         const wpos = [wx, wy + scale + 0.10, wz];
         const bbMat = makeBillboardMatrix(viewMatrix, wpos);
