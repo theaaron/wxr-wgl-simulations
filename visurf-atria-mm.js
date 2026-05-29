@@ -137,7 +137,7 @@ let exciteRadius = Math.round(0.05 * surfMaxDim);
 
 const TAUBIN_LAMBDA = 0.5;
 const TAUBIN_MU = -0.53;
-const TAUBIN_ITERATIONS = 10;
+const TAUBIN_ITERATIONS = 80;
 
 let domainSet = null;
 let domainNx = 0, domainNy = 0, domainNz = 0;
