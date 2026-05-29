@@ -84,8 +84,9 @@ const mat4u = {
     },
 };
 
+const _normalMatBuf = new Float32Array(16);
 function normalMat(m) {
-    const o = new Float32Array(16);
+    const o = _normalMatBuf;
     const m00=m[0],m01=m[1],m02=m[2],m03=m[3],m10=m[4],m11=m[5],m12=m[6],m13=m[7];
     const m20=m[8],m21=m[9],m22=m[10],m23=m[11],m30=m[12],m31=m[13],m32=m[14],m33=m[15];
     const b00=m00*m11-m01*m10,b01=m00*m12-m02*m10,b02=m00*m13-m03*m10;
@@ -116,6 +117,7 @@ let gl = null;
 let xrSession = null;
 let xrReferenceSpace = null;
 let surfProg = null;
+let surfLoc  = null;
 let structure = null;
 
 let posTex = null;
@@ -506,44 +508,44 @@ function drawSurface(projMatrix, viewMatrix, modelMatrix) {
     gl.useProgram(surfProg);
 
     const nm = normalMat(modelMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_projectionMatrix'), false, projMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_viewMatrix'), false, viewMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_modelMatrix'), false, modelMatrix);
-    gl.uniformMatrix4fv(gl.getUniformLocation(surfProg, 'u_normalMatrix'), false, nm);
+    gl.uniformMatrix4fv(surfLoc.projMat,   false, projMatrix);
+    gl.uniformMatrix4fv(surfLoc.viewMat,   false, viewMatrix);
+    gl.uniformMatrix4fv(surfLoc.modelMat,  false, modelMatrix);
+    gl.uniformMatrix4fv(surfLoc.normalMat, false, nm);
 
     const { x: cutX, y: cutY, z: cutZ } = getCutValues();
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutX'), cutX);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutY'), cutY);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_cutZ'), cutZ);
+    gl.uniform1f(surfLoc.cutX, cutX);
+    gl.uniform1f(surfLoc.cutY, cutY);
+    gl.uniform1f(surfLoc.cutZ, cutZ);
 
-    gl.uniform4f(gl.getUniformLocation(surfProg, 'u_lightColor'), 1, 1, 1, 1);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_lightAmbientTerm'), 0.15);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_lightSpecularTerm'), 0.5);
-    gl.uniform3fv(gl.getUniformLocation(surfProg, 'u_lightDirection'), LIGHT_DIR);
-    gl.uniform4f(gl.getUniformLocation(surfProg, 'u_materialColor'), 0.9, 0.9, 0.9, 1);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_materialAmbientTerm'), 1.0);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_materialSpecularTerm'), 0.8);
-    gl.uniform1f(gl.getUniformLocation(surfProg, 'u_shininess'), 12.0);
+    gl.uniform4f(surfLoc.lightColor, 1, 1, 1, 1);
+    gl.uniform1f(surfLoc.lightAmb,   0.15);
+    gl.uniform1f(surfLoc.lightSpec,  0.5);
+    gl.uniform3fv(surfLoc.lightDir,  LIGHT_DIR);
+    gl.uniform4f(surfLoc.matColor,   0.9, 0.9, 0.9, 1);
+    gl.uniform1f(surfLoc.matAmb,     1.0);
+    gl.uniform1f(surfLoc.matSpec,    0.8);
+    gl.uniform1f(surfLoc.shininess,  12.0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, posTex);
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_posTex'), 0);
+    gl.uniform1i(surfLoc.posTex, 0);
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, normalTex);
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_normalTex'), 1);
+    gl.uniform1i(surfLoc.normalTex, 1);
 
     const simOn = isSimulationWorking();
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_useSimTex'), simOn ? 1 : 0);
+    gl.uniform1i(surfLoc.useSimTex, simOn ? 1 : 0);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, simOn ? getVoltageTexture() : posTex);
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_voltageTex'), 2);
+    gl.uniform1i(surfLoc.voltageTex, 2);
 
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, getAblationTexture() || posTex);
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_ablationTex'), 3);
+    gl.uniform1i(surfLoc.ablationTex, 3);
 
-    gl.uniform1i(gl.getUniformLocation(surfProg, 'u_simRunning'), simRunning ? 1 : 0);
+    gl.uniform1i(surfLoc.simRunning, simRunning ? 1 : 0);
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthMask(true);
@@ -573,6 +575,29 @@ function initGL() {
     gl.getExtension('EXT_color_buffer_float');
     surfProg = mkProgram(gl, SURF_VS, SURF_FS, 'Surface');
     if (!surfProg) return false;
+    surfLoc = {
+        projMat:   gl.getUniformLocation(surfProg, 'u_projectionMatrix'),
+        viewMat:   gl.getUniformLocation(surfProg, 'u_viewMatrix'),
+        modelMat:  gl.getUniformLocation(surfProg, 'u_modelMatrix'),
+        normalMat: gl.getUniformLocation(surfProg, 'u_normalMatrix'),
+        cutX:      gl.getUniformLocation(surfProg, 'u_cutX'),
+        cutY:      gl.getUniformLocation(surfProg, 'u_cutY'),
+        cutZ:      gl.getUniformLocation(surfProg, 'u_cutZ'),
+        lightColor:    gl.getUniformLocation(surfProg, 'u_lightColor'),
+        lightAmb:      gl.getUniformLocation(surfProg, 'u_lightAmbientTerm'),
+        lightSpec:     gl.getUniformLocation(surfProg, 'u_lightSpecularTerm'),
+        lightDir:      gl.getUniformLocation(surfProg, 'u_lightDirection'),
+        matColor:      gl.getUniformLocation(surfProg, 'u_materialColor'),
+        matAmb:        gl.getUniformLocation(surfProg, 'u_materialAmbientTerm'),
+        matSpec:       gl.getUniformLocation(surfProg, 'u_materialSpecularTerm'),
+        shininess:     gl.getUniformLocation(surfProg, 'u_shininess'),
+        posTex:        gl.getUniformLocation(surfProg, 'u_posTex'),
+        normalTex:     gl.getUniformLocation(surfProg, 'u_normalTex'),
+        useSimTex:     gl.getUniformLocation(surfProg, 'u_useSimTex'),
+        voltageTex:    gl.getUniformLocation(surfProg, 'u_voltageTex'),
+        ablationTex:   gl.getUniformLocation(surfProg, 'u_ablationTex'),
+        simRunning:    gl.getUniformLocation(surfProg, 'u_simRunning'),
+    };
     initVRControllers(gl);
     initVRPanel(gl);
     initHandRenderer(gl);
