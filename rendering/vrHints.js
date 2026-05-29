@@ -128,7 +128,7 @@ function createHintTextTexture(text) {
 }
 
 function makeHint(getTex) {
-    return { state: 'HIDDEN', timer: 0, alpha: 0, getTex };
+    return { state: 'VISIBLE', timer: 0, alpha: 1.0, getTex };
 }
 
 function advanceHint(hint, dt, dismissed) {
