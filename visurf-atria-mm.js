@@ -143,6 +143,7 @@ const TAUBIN_ITERATIONS = 80;
 
 let domainSet = null;
 let domainNx = 0, domainNy = 0, domainNz = 0;
+let loadedStructureKey = null;
 
 
 let excitationMode = false;
@@ -801,15 +802,23 @@ window.addEventListener('load', () => {
     vrBtn.addEventListener('click', async () => {
         if (xrSession) { xrSession.end(); return; }
 
+        const sizeBtn      = document.querySelector('.sel-btn[data-size].active');
+        const structureBtn = document.querySelector('.sel-btn[data-structure].active');
+        const structType   = structureBtn?.dataset.structure ?? 'atria';
+        const sizeType     = sizeBtn?.dataset.size ?? 'small';
+        const currentKey   = `${structType}-${sizeType}`;
+
+        if (structure && loadedStructureKey !== currentKey) {
+            structure = null;
+            loadedStructureKey = null;
+        }
+
         if (!structure) {
             vrBtn.disabled = true;
             vrBtn.textContent = 'Loading…';
 
-            const sizeBtn      = document.querySelector('.sel-btn[data-size].active');
-            const structureBtn = document.querySelector('.sel-btn[data-structure].active');
-            const structType   = structureBtn?.dataset.structure ?? 'atria';
-            const PATHS        = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
-            const PATH         = PATHS[sizeBtn?.dataset.size] ?? PATHS.small;
+            const PATHS = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
+            const PATH  = PATHS[sizeType] ?? PATHS.small;
 
             try {
                 const structBuf = await fetchWithProgress('Heart structure', PATH);
@@ -859,6 +868,7 @@ window.addEventListener('load', () => {
                     },
                 });
                 setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
+                loadedStructureKey = currentKey;
 
                 window.addEventListener('keydown', e => {
                     if (!structure) return;
