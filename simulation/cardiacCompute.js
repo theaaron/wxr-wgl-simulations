@@ -72,7 +72,7 @@ const params = {
 };
 
 let running = false;
-let stepsPerFrame = 30;
+let stepsPerFrame = 40;
 
 const quadVS = `#version 300 es
 layout(location = 0) in vec2 a_position;
