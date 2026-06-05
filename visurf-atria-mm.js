@@ -369,6 +369,8 @@ function buildSurfaceBuffers(struct) {
     const hr = [(maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2];
     surfBoundsRadius = Math.sqrt(hr[0]*hr[0] + hr[1]*hr[1] + hr[2]*hr[2]);
 
+    _lastCtrlHitT.left = null;
+    _lastCtrlHitT.right = null;
     console.log(`Surface buffers: ${noNodes} vertices (${bf.noTriangles} triangles)`);
 }
 
@@ -388,6 +390,8 @@ function raySphereHit(origin, dir, center, radius) {
 }
 
 const _voxelOut = { x: 0, y: 0, z: 0 };
+const _lastCtrlHitT = { left: null, right: null };
+let _frameHits = null;
 function worldToVoxel(wx, wy, wz, modelMatrix) {
     const m = modelMatrix;
     const s2 = m[0]*m[0] + m[1]*m[1] + m[2]*m[2];
@@ -430,19 +434,50 @@ function rayMarchSurface(origin, dir, modelMatrix) {
         const py = origin.y + dir.y * t;
         const pz = origin.z + dir.z * t;
         const v = worldToVoxel(px, py, pz, modelMatrix);
-        if (isDomainVoxel(v.x, v.y, v.z)) return { t, voxel: v };
+        if (isDomainVoxel(v.x, v.y, v.z)) return { t, voxel: { x: v.x, y: v.y, z: v.z } };
     }
     return null;
 }
 
+function rayMarchSurfaceCached(origin, dir, modelMatrix, hand) {
+    const lastT = _lastCtrlHitT[hand];
+    if (lastT !== null) {
+        const scale = Math.sqrt(modelMatrix[0]**2 + modelMatrix[1]**2 + modelMatrix[2]**2);
+        const step = 0.5 * scale * 2.0 / surfMaxDim;
+        const margin = step * 30;
+        const tStart = Math.max(0, lastT - margin);
+        const tEnd = lastT + margin;
+        for (let t = tStart; t <= tEnd; t += step) {
+            const v = worldToVoxel(origin.x + dir.x * t, origin.y + dir.y * t, origin.z + dir.z * t, modelMatrix);
+            if (isDomainVoxel(v.x, v.y, v.z)) {
+                _lastCtrlHitT[hand] = t;
+                return { t, voxel: { x: v.x, y: v.y, z: v.z } };
+            }
+        }
+    }
+    const result = rayMarchSurface(origin, dir, modelMatrix);
+    _lastCtrlHitT[hand] = result ? result.t : null;
+    return result;
+}
+
+function computeFrameControllerHits(modelMatrix) {
+    if (_frameHits !== null) return;
+    const L = getLeftController();
+    const R = getRightController();
+    _frameHits = {
+        left:  (L && !L.isHand) ? rayMarchSurfaceCached(L.origin, L.direction, modelMatrix, 'left')  : null,
+        right: (R && !R.isHand) ? rayMarchSurfaceCached(R.origin, R.direction, modelMatrix, 'right') : null,
+    };
+}
 
 function updateContinuousExcitation(modelMatrix) {
     if (!excitationMode || !structure) return;
 
+    computeFrameControllerHits(modelMatrix);
     for (const hand of ['left', 'right']) {
         const ctrl = hand === 'left' ? getLeftController() : getRightController();
         if (ctrl && !ctrl.isHand && isTriggerHeld(hand)) {
-            const hit = rayMarchSurface(ctrl.origin, ctrl.direction, modelMatrix);
+            const hit = _frameHits[hand];
             if (hit) exciteAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, exciteRadius);
         }
     }
@@ -462,10 +497,11 @@ function updateContinuousAblation(modelMatrix) {
     if (!structure) return;
 
     if (ablationMode) {
+        computeFrameControllerHits(modelMatrix);
         for (const hand of ['left', 'right']) {
             const ctrl = hand === 'left' ? getLeftController() : getRightController();
             if (ctrl && !ctrl.isHand && isTriggerHeld(hand)) {
-                const hit = rayMarchSurface(ctrl.origin, ctrl.direction, modelMatrix);
+                const hit = _frameHits[hand];
                 if (hit) ablateAt(hit.voxel.x, hit.voxel.y, hit.voxel.z, ablateRadius);
             }
         }
@@ -483,11 +519,11 @@ function updateContinuousAblation(modelMatrix) {
 }
 
 function updateSurfaceHitDistances(modelMatrix) {
-    const L = getLeftController();
-    const R = getRightController();
-    const leftHit  = (L && !L.isHand) ? rayMarchSurface(L.origin,  L.direction,  modelMatrix) : null;
-    const rightHit = (R && !R.isHand) ? rayMarchSurface(R.origin,  R.direction,  modelMatrix) : null;
-    setControllerHitDistances(leftHit ? leftHit.t : null, rightHit ? rightHit.t : null);
+    computeFrameControllerHits(modelMatrix);
+    setControllerHitDistances(
+        _frameHits.left  ? _frameHits.left.t  : null,
+        _frameHits.right ? _frameHits.right.t : null
+    );
 }
 
 function mkF32Tex(w, h, data) {
@@ -626,6 +662,7 @@ function buildDesktopLabMatrix() {
 function onXRFrame(time, frame) {
     if (!xrSession) return;
     xrSession.requestAnimationFrame(onXRFrame);
+    _frameHits = null;
     const dt = lastHintFrameTime !== null ? (time - lastHintFrameTime) / 1000 : 0;
     lastHintFrameTime = time;
     updateVRHints(dt, isPanelGrabbed(), isHandPinching('left') && isHandPinching('right'));
