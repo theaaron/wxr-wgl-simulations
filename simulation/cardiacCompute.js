@@ -72,7 +72,7 @@ const params = {
 };
 
 let running = false;
-let stepsPerFrame = 20;
+let stepsPerFrame = 30;
 
 const quadVS = `#version 300 es
 layout(location = 0) in vec2 a_position;
@@ -393,8 +393,8 @@ export function initCardiacSimulation(glContext, structure) {
     my = meta.my;
 
     params.lx = 0.0625 * (fullWidth / mx);
-    
-    console.log(`Initializing cardiac simulation (resolution=${fullWidth/mx}, lx=${params.lx})`);
+
+    console.log(`Initializing cardiac simulation (resolution=${fullWidth/mx}, lx=${params.lx}, stepsPerFrame=${stepsPerFrame})`);
     
     createQuad();
     
