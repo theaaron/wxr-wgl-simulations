@@ -29,6 +29,9 @@ let copyProgram = null;
 let directionatorProgram_0 = null;
 let directionatorProgram_1 = null;
 
+let tsLoc = null;
+let exLoc = null;
+
 let compressedTexelIndex_gpu = null;
 let dirFBO_0 = null;
 let dirFBO_1 = null;
@@ -722,71 +725,121 @@ function compilePrograms() {
         console.log('[directionator] GPU directionator compiled OK (2-pass)');
     }
 
+    tsLoc = {
+        icolor0:    gl.getUniformLocation(timeStepProgram, 'icolor0'),
+        vlt_txtr:   gl.getUniformLocation(timeStepProgram, 'vlt_txtr'),
+        idir0:      gl.getUniformLocation(timeStepProgram, 'idir0'),
+        idir1:      gl.getUniformLocation(timeStepProgram, 'idir1'),
+        ablationMap:gl.getUniformLocation(timeStepProgram, 'ablationMap'),
+        dt:         gl.getUniformLocation(timeStepProgram, 'dt'),
+        diffCoef:   gl.getUniformLocation(timeStepProgram, 'diffCoef'),
+        lx:         gl.getUniformLocation(timeStepProgram, 'lx'),
+        C_m:        gl.getUniformLocation(timeStepProgram, 'C_m'),
+        resolution: gl.getUniformLocation(timeStepProgram, 'resolution'),
+        u_na:       gl.getUniformLocation(timeStepProgram, 'u_na'),
+        u_v:        gl.getUniformLocation(timeStepProgram, 'u_v'),
+        u_w:        gl.getUniformLocation(timeStepProgram, 'u_w'),
+        u_d:        gl.getUniformLocation(timeStepProgram, 'u_d'),
+        u_c:        gl.getUniformLocation(timeStepProgram, 'u_c'),
+        u_m:        gl.getUniformLocation(timeStepProgram, 'u_m'),
+        u_0:        gl.getUniformLocation(timeStepProgram, 'u_0'),
+        u_so:       gl.getUniformLocation(timeStepProgram, 'u_so'),
+        x_tso:      gl.getUniformLocation(timeStepProgram, 'x_tso'),
+        x_k:        gl.getUniformLocation(timeStepProgram, 'x_k'),
+        u_csi:      gl.getUniformLocation(timeStepProgram, 'u_csi'),
+        t_d:        gl.getUniformLocation(timeStepProgram, 't_d'),
+        t_soa:      gl.getUniformLocation(timeStepProgram, 't_soa'),
+        t_sob:      gl.getUniformLocation(timeStepProgram, 't_sob'),
+        t_o:        gl.getUniformLocation(timeStepProgram, 't_o'),
+        t_si:       gl.getUniformLocation(timeStepProgram, 't_si'),
+        t_vm:       gl.getUniformLocation(timeStepProgram, 't_vm'),
+        t_vmm:      gl.getUniformLocation(timeStepProgram, 't_vmm'),
+        t_vp:       gl.getUniformLocation(timeStepProgram, 't_vp'),
+        t_wm:       gl.getUniformLocation(timeStepProgram, 't_wm'),
+        t_wp:       gl.getUniformLocation(timeStepProgram, 't_wp'),
+        t_sm:       gl.getUniformLocation(timeStepProgram, 't_sm'),
+        t_sp:       gl.getUniformLocation(timeStepProgram, 't_sp'),
+    };
+
+    exLoc = {
+        icolor0:     gl.getUniformLocation(exciteProgram, 'icolor0'),
+        fullTexelIndex: gl.getUniformLocation(exciteProgram, 'fullTexelIndex'),
+        exciteCenter: gl.getUniformLocation(exciteProgram, 'exciteCenter'),
+        exciteRadius: gl.getUniformLocation(exciteProgram, 'exciteRadius'),
+        mx:          gl.getUniformLocation(exciteProgram, 'mx'),
+        my:          gl.getUniformLocation(exciteProgram, 'my'),
+        fullWidth:   gl.getUniformLocation(exciteProgram, 'fullWidth'),
+        fullHeight:  gl.getUniformLocation(exciteProgram, 'fullHeight'),
+    };
+
+    gl.useProgram(timeStepProgram);
+    gl.uniform1i(tsLoc.icolor0,     0);
+    gl.uniform1i(tsLoc.vlt_txtr,    0);
+    gl.uniform1i(tsLoc.idir0,       1);
+    gl.uniform1i(tsLoc.idir1,       2);
+    gl.uniform1i(tsLoc.ablationMap, 3);
+    gl.uniform1f(tsLoc.dt,          params.dt);
+    gl.uniform1f(tsLoc.diffCoef,    params.diffCoef);
+    gl.uniform1f(tsLoc.lx,          params.lx);
+    gl.uniform1f(tsLoc.C_m,         params.C_m);
+    gl.uniform1i(tsLoc.resolution,  fullWidth / mx);
+    gl.uniform1f(tsLoc.u_na,  params.u_na);
+    gl.uniform1f(tsLoc.u_v,   params.u_v);
+    gl.uniform1f(tsLoc.u_w,   params.u_w);
+    gl.uniform1f(tsLoc.u_d,   params.u_d);
+    gl.uniform1f(tsLoc.u_c,   params.u_c);
+    gl.uniform1f(tsLoc.u_m,   params.u_m);
+    gl.uniform1f(tsLoc.u_0,   params.u_0);
+    gl.uniform1f(tsLoc.u_so,  params.u_so);
+    gl.uniform1f(tsLoc.x_tso, params.x_tso);
+    gl.uniform1f(tsLoc.x_k,   params.x_k);
+    gl.uniform1f(tsLoc.u_csi, params.u_csi);
+    gl.uniform1f(tsLoc.t_d,   params.t_d);
+    gl.uniform1f(tsLoc.t_soa, params.t_soa);
+    gl.uniform1f(tsLoc.t_sob, params.t_sob);
+    gl.uniform1f(tsLoc.t_o,   params.t_o);
+    gl.uniform1f(tsLoc.t_si,  params.t_si);
+    gl.uniform1f(tsLoc.t_vm,  params.t_vm);
+    gl.uniform1f(tsLoc.t_vmm, params.t_vmm);
+    gl.uniform1f(tsLoc.t_vp,  params.t_vp);
+    gl.uniform1f(tsLoc.t_wm,  params.t_wm);
+    gl.uniform1f(tsLoc.t_wp,  params.t_wp);
+    gl.uniform1f(tsLoc.t_sm,  params.t_sm);
+    gl.uniform1f(tsLoc.t_sp,  params.t_sp);
+
+    gl.useProgram(exciteProgram);
+    gl.uniform1i(exLoc.icolor0,      0);
+    gl.uniform1i(exLoc.fullTexelIndex, 1);
+    gl.uniform1i(exLoc.mx,          mx);
+    gl.uniform1i(exLoc.my,          my);
+    gl.uniform1i(exLoc.fullWidth,   fullWidth);
+    gl.uniform1i(exLoc.fullHeight,  fullHeight);
+
+    gl.useProgram(null);
+
     return true;
 }
 
 function runTimeStep() {
-    const readTex = currentBuffer === 0 ? fcolor0 : scolor0;
-    const writeFBO = currentBuffer === 0 ? fbo0 : fbo1;
-    
+    const readTex  = currentBuffer === 0 ? fcolor0 : scolor0;
+    const writeFBO = currentBuffer === 0 ? fbo0    : fbo1;
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, compWidth, compHeight);
     gl.useProgram(timeStepProgram);
-    
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, readTex);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'icolor0'), 0);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'vlt_txtr'), 0);
-    
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, dir0);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'idir0'), 1);
-    
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, dir1);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'idir1'), 2);
 
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, ablationTexture || null);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'ablationMap'), 3);
-    
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'dt'), params.dt);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'diffCoef'), params.diffCoef);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'lx'), params.lx);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'C_m'), params.C_m);
-    gl.uniform1i(gl.getUniformLocation(timeStepProgram, 'resolution'), fullWidth / mx);
-    
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_na'), params.u_na);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_v'), params.u_v);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_w'), params.u_w);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_d'), params.u_d);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_c'), params.u_c);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_m'), params.u_m);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_0'), params.u_0);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_so'), params.u_so);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'x_tso'), params.x_tso);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'x_k'), params.x_k);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 'u_csi'), params.u_csi);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_d'), params.t_d);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_soa'), params.t_soa);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_sob'), params.t_sob);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_o'), params.t_o);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_si'), params.t_si);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_vm'), params.t_vm);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_vmm'), params.t_vmm);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_vp'), params.t_vp);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_wm'), params.t_wm);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_wp'), params.t_wp);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_sm'), params.t_sm);
-    gl.uniform1f(gl.getUniformLocation(timeStepProgram, 't_sp'), params.t_sp);
-    
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, readTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, dir0);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, dir1);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, ablationTexture || null);
+
     gl.bindVertexArray(quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
-    
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    
+
     currentBuffer = 1 - currentBuffer;
 }
 
@@ -819,21 +872,14 @@ export function exciteAt(x, y, z, radius = 5) {
     
     gl.viewport(0, 0, compWidth, compHeight);
     gl.useProgram(exciteProgram);
-    
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, readTex);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'icolor0'), 0);
-    
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, fullTexelIndex);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullTexelIndex'), 1);
-    
-    gl.uniform3i(gl.getUniformLocation(exciteProgram, 'exciteCenter'), x, y, z);
-    gl.uniform1f(gl.getUniformLocation(exciteProgram, 'exciteRadius'), radius);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'mx'), mx);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'my'), my);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullWidth'), fullWidth);
-    gl.uniform1i(gl.getUniformLocation(exciteProgram, 'fullHeight'), fullHeight);
+
+    gl.uniform3i(exLoc.exciteCenter, x, y, z);
+    gl.uniform1f(exLoc.exciteRadius, radius);
     
     gl.bindVertexArray(quadVAO);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -875,7 +921,6 @@ export function isSimulationWorking() {
     return initialized && fboValid;
 }
 
-// for reading voltage back to CPU (for coloring voxels)
 export function readVoltageData() {
     if (!initialized || !fboValid) return null;
     
