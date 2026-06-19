@@ -12,7 +12,7 @@ import {
     initVRPanel, setPanelCallbacks, renderVRPanel, updatePanelHover,
     fingerPokePanel, updatePanelGrab, isPanelGrabbed, triggerPanelButton,
     setButtonActive, getPanelModelMatrix, updateButtonLabel, getCutValues,
-    rayUpdateCutPanel
+    rayUpdateCutPanel, updateSimStepsDisplay
 } from './rendering/vrPanel.js';
 import { initVRHints, updateVRHints, renderVRHints, setHintsEnabled, areHintsEnabled } from './rendering/vrHints.js';
 import {
@@ -26,7 +26,7 @@ import { initHandRenderer, renderHands } from './rendering/renderHandsModel.js';
 import {
     initCardiacSimulation, stepSimulation, exciteAt,
     isSimulationWorking, getVoltageTexture, getCompressedCoord,
-    getCompressedDimensions, getStepsPerFrame, resetSimulation,
+    getCompressedDimensions, getStepsPerFrame, setStepsPerFrame, resetSimulation,
     setAblationTexture, getAblationParams
 } from './simulation/cardiacCompute.js';
 import { initAblation, ablateAt, resetAblation, getAblationTexture } from './simulation/ablationCompute.js';
@@ -946,8 +946,14 @@ window.addEventListener('load', () => {
                     setHintsEnabled(nowEnabled);
                     updateButtonLabel('btn_1_2', nowEnabled ? 'Hide Hints' : 'Show Hints');
                 },
+                changeSteps: (delta) => {
+                    const next = Math.max(1, Math.min(200, getStepsPerFrame() + delta));
+                    setStepsPerFrame(next);
+                    updateSimStepsDisplay(next);
+                },
             });
             setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
+            updateSimStepsDisplay(getStepsPerFrame());
             loadedStructureKey = key;
 
             setButtonReady();

@@ -61,16 +61,32 @@ function generateButtons() {
         }
     }
 
+    const rowY  = top - 2 * (btnH + g) - btnH / 2;
+    const fullW = right - left;
+    const halfW = (fullW - g) / 2;
+
     buttons['btn_cut'] = {
-        x: (left + right) / 2,
-        y: top - 2 * (btnH + g) - btnH / 2,
-        width: right - left,
+        x: left + halfW / 2,
+        y: rowY,
+        width: halfW,
         height: btnH,
         color: [0.0, 0.32, 0.56],
         hoverColor: [0.0, 0.45, 0.75],
         baseColor: [0.0, 0.32, 0.56],
         activeColor: [0.7, 0.35, 0.0],
         action: 'toggleCut',
+    };
+
+    buttons['btn_sim'] = {
+        x: left + halfW + g + halfW / 2,
+        y: rowY,
+        width: halfW,
+        height: btnH,
+        color: [0.0, 0.32, 0.56],
+        hoverColor: [0.0, 0.45, 0.75],
+        baseColor: [0.0, 0.32, 0.56],
+        activeColor: [0.7, 0.35, 0.0],
+        action: 'toggleSim',
     };
 
     return buttons;
@@ -97,6 +113,10 @@ const buttonLabelTextures = {};
 
 let hoveredButton = null;
 let barHovered = false;
+let simHovered = null;
+
+let simStepsDisplay = 40;
+const simPanelTextures = {};
 
 let panelGrab = {
     active: false,
@@ -135,6 +155,17 @@ const LABEL_W      = 0.07;
 const LABEL_H      = CUT_ITEM_H * 0.65;
 
 let cutPanelTextures = {};
+
+// ---- Sim panel layout ----
+const SIM_STEPS_Y =  0.28;
+const SIM_BTNS_Y  =  0.04;
+const SIM_BTN_W   =  0.34;
+const SIM_BTN_H   =  0.22;
+const SIM_DEC_X   = -0.20;
+const SIM_INC_X   =  0.20;
+const SIM_DONE_Y  = -0.24;
+const SIM_DONE_W  =  0.72;
+const SIM_DONE_H  =  0.18;
 
 // ============================================================================
 // SHADERS
@@ -287,10 +318,16 @@ export function initVRPanel(glContext) {
 
     buttonLabels['btn_cut'] = 'Cut';
     buttonLabelTextures['btn_cut'] = createTextTexture('Cut');
+    buttonLabels['btn_sim'] = 'Sim Opts';
+    buttonLabelTextures['btn_sim'] = createTextTexture('Sim Opts');
     cutPanelTextures.x_label  = createTextTexture('X',  128, 128);
     cutPanelTextures.y_label  = createTextTexture('Y',  128, 128);
     cutPanelTextures.z_label  = createTextTexture('Z',  128, 128);
     cutPanelTextures.done_btn = createTextTexture('Done');
+    simPanelTextures.steps_label = createTextTexture(`${simStepsDisplay} steps`, 256, 128);
+    simPanelTextures.decrement   = createTextTexture('−', 128, 128);
+    simPanelTextures.increment   = createTextTexture('+', 128, 128);
+    simPanelTextures.done        = createTextTexture('Done');
 
     if (panelProgram && buttonProgram && barProgram && textProgram) {
         console.log('VR Panel initialized');
@@ -397,6 +434,14 @@ export function updateButtonLabel(id, text) {
 
 export function getCutValues() {
     return { x: cutState.x, y: cutState.y, z: cutState.z };
+}
+
+export function updateSimStepsDisplay(n) {
+    simStepsDisplay = n;
+    if (gl && simPanelTextures.steps_label) {
+        gl.deleteTexture(simPanelTextures.steps_label);
+        simPanelTextures.steps_label = createTextTexture(`${n} steps`, 256, 128);
+    }
 }
 
 export function setButtonActive(buttonId, active) {
@@ -532,6 +577,16 @@ export function rayUpdateCutPanel(origin, direction) {
     return false;
 }
 
+function hitTestSimPanel(hitX, hitY) {
+    if (Math.abs(hitX - SIM_DEC_X) <= SIM_BTN_W / 2 && Math.abs(hitY - SIM_BTNS_Y) <= SIM_BTN_H / 2)
+        return 'btn_sim_decrement';
+    if (Math.abs(hitX - SIM_INC_X) <= SIM_BTN_W / 2 && Math.abs(hitY - SIM_BTNS_Y) <= SIM_BTN_H / 2)
+        return 'btn_sim_increment';
+    if (Math.abs(hitX) <= SIM_DONE_W / 2 && Math.abs(hitY - SIM_DONE_Y) <= SIM_DONE_H / 2)
+        return 'btn_done_sim';
+    return null;
+}
+
 function hitTestCutPanel(hitX, hitY) {
     for (let i = 0; i < 3; i++) {
         if (Math.abs(hitY - sliderItemY(i)) <= CUT_ITEM_H / 2) {
@@ -553,6 +608,7 @@ export function fingerPokePanel(fingerTipPos) {
     if (Math.abs(local[0]) > 0.5 || Math.abs(local[1]) > 0.5) return null;
 
     if (panelMode === 'cut') return hitTestCutPanel(local[0], local[1]);
+    if (panelMode === 'sim') return hitTestSimPanel(local[0], local[1]);
     return hitTestButton(local[0], local[1]);
 }
 
@@ -564,6 +620,7 @@ export function updatePanelHover(leftController, rightController) {
     hoveredButton = null;
     barHovered = false;
     cutHovered = null;
+    simHovered = null;
 
     const controllers = [leftController, rightController].filter(Boolean);
     for (const ctrl of controllers) {
@@ -576,6 +633,9 @@ export function updatePanelHover(leftController, rightController) {
                 cutHovered = 'done';
                 return;
             }
+        } else if (panelMode === 'sim') {
+            const sh = hitTestSimPanel(hit.hitX, hit.hitY);
+            if (sh) { simHovered = sh; return; }
         } else {
             const btn = hitTestButton(hit.hitX, hit.hitY);
             if (btn) { hoveredButton = btn; return; }
@@ -590,12 +650,28 @@ export function updatePanelHover(leftController, rightController) {
 // ============================================================================
 
 export function triggerPanelButton(buttonId) {
-    const id = buttonId || hoveredButton;
+    const id = buttonId || hoveredButton || simHovered;
     if (!id) return false;
 
     if (id === 'btn_done_cut') {
         panelMode = 'normal';
         setButtonActive('btn_cut', false);
+        return true;
+    }
+
+    if (id === 'btn_done_sim') {
+        panelMode = 'normal';
+        setButtonActive('btn_sim', false);
+        return true;
+    }
+
+    if (id === 'btn_sim_decrement') {
+        if (callbacks.changeSteps) callbacks.changeSteps(-5);
+        return true;
+    }
+
+    if (id === 'btn_sim_increment') {
+        if (callbacks.changeSteps) callbacks.changeSteps(+5);
         return true;
     }
 
@@ -609,6 +685,12 @@ export function triggerPanelButton(buttonId) {
         return true;
     }
 
+    if (action === 'toggleSim') {
+        panelMode = 'sim';
+        setButtonActive('btn_sim', true);
+        return true;
+    }
+
     if (action && callbacks[action]) {
         callbacks[action]();
         return true;
@@ -617,7 +699,7 @@ export function triggerPanelButton(buttonId) {
 }
 
 export function isHoveringPanel() {
-    return hoveredButton !== null;
+    return hoveredButton !== null || simHovered !== null;
 }
 
 export function getHoveredButton() {
@@ -792,6 +874,8 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
         }
+    } else if (panelMode === 'sim') {
+        renderSimPanel(projectionMatrix, viewMatrix, modelMatrix);
     } else {
         renderCutPanel(projectionMatrix, viewMatrix, modelMatrix);
     }
@@ -886,6 +970,78 @@ function renderCutPanel(projMatrix, viewMatrix, modelMatrix) {
         }
         gl.bindTexture(gl.TEXTURE_2D, null);
     }
+}
+
+function renderSimPanel(projMatrix, viewMatrix, modelMatrix) {
+    gl.useProgram(buttonProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_projectionMatrix'), false, projMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_viewMatrix'), false, viewMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(buttonProgram, 'u_modelMatrix'), false, modelMatrix);
+    gl.uniform1f(gl.getUniformLocation(buttonProgram, 'u_hover'), 0);
+    bindQuad(buttonProgram);
+
+    const decColor  = simHovered === 'btn_sim_decrement' ? [0.0, 0.45, 0.75] : [0.0, 0.32, 0.56];
+    const incColor  = simHovered === 'btn_sim_increment' ? [0.0, 0.45, 0.75] : [0.0, 0.32, 0.56];
+    const doneColor = simHovered === 'btn_done_sim'      ? [0.0, 0.45, 0.75] : [0.0, 0.32, 0.56];
+
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [SIM_DEC_X, SIM_BTNS_Y, 0]);
+    gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [SIM_BTN_W, SIM_BTN_H]);
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), decColor);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [SIM_INC_X, SIM_BTNS_Y, 0]);
+    gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [SIM_BTN_W, SIM_BTN_H]);
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), incColor);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonOffset'), [0, SIM_DONE_Y, 0]);
+    gl.uniform2fv(gl.getUniformLocation(buttonProgram, 'u_buttonSize'), [SIM_DONE_W, SIM_DONE_H]);
+    gl.uniform3fv(gl.getUniformLocation(buttonProgram, 'u_buttonColor'), doneColor);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+
+    if (!textProgram) return;
+    gl.useProgram(textProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_projectionMatrix'), false, projMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_viewMatrix'), false, viewMatrix);
+    gl.uniformMatrix4fv(gl.getUniformLocation(textProgram, 'u_modelMatrix'), false, modelMatrix);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(gl.getUniformLocation(textProgram, 'u_texture'), 0);
+    bindQuad(textProgram);
+
+    const ac = PANEL.height / PANEL.width;
+
+    if (simPanelTextures.steps_label) {
+        gl.bindTexture(gl.TEXTURE_2D, simPanelTextures.steps_label);
+        gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [0, SIM_STEPS_Y, 0]);
+        gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [0.50, 0.12]);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    if (simPanelTextures.decrement) {
+        gl.bindTexture(gl.TEXTURE_2D, simPanelTextures.decrement);
+        gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [SIM_DEC_X, SIM_BTNS_Y, 0]);
+        const h = SIM_BTN_H * 0.65;
+        gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [h * ac, h]);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    if (simPanelTextures.increment) {
+        gl.bindTexture(gl.TEXTURE_2D, simPanelTextures.increment);
+        gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [SIM_INC_X, SIM_BTNS_Y, 0]);
+        const h = SIM_BTN_H * 0.65;
+        gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [h * ac, h]);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    if (simPanelTextures.done) {
+        gl.bindTexture(gl.TEXTURE_2D, simPanelTextures.done);
+        gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [0, SIM_DONE_Y, 0]);
+        const h = SIM_DONE_H * 0.60;
+        gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [h * 2 * ac, h]);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
 }
 
 function bindQuad(program) {
