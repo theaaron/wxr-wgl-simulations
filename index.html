@@ -17,6 +17,11 @@
 
         <button class="sel-btn active" data-size="large" style="display:none">Large</button>
 
+        <div class="custom-file-row">
+            <input type="file" id="custom-json" accept=".json">
+            <button id="custom-clear" class="custom-clear-btn" style="display:none" title="Clear custom file">✕</button>
+        </div>
+
         <button id="vr-button">Enter VR</button>
         <div id="status"></div>
     </div>
@@ -28,6 +33,18 @@
                     .forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
             });
+        });
+
+        const customInput = document.getElementById('custom-json');
+        const customClear = document.getElementById('custom-clear');
+
+        customInput.addEventListener('change', () => {
+            customClear.style.display = customInput.files.length ? '' : 'none';
+        });
+
+        customClear.addEventListener('click', () => {
+            customInput.value = '';
+            customClear.style.display = 'none';
         });
     </script>
     <script type="module" src="visurf-atria-mm.js"></script>

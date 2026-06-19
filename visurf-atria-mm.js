@@ -246,8 +246,6 @@ async function taubinSmooth(posData, adjacency, lambda, mu, iterations) {
         }
     }
 
-    // Yield to the browser periodically so the page stays responsive (and
-    // any loading spinner keeps animating) during this CPU-heavy pass.
     for (let iter = 0; iter < iterations; iter++) {
         laplacianPass(src, dst, lambda);
         laplacianPass(dst, src, mu);
@@ -848,6 +846,11 @@ window.addEventListener('load', () => {
     });
 
     function getSelectedKey() {
+        const customInput = document.getElementById('custom-json');
+        if (customInput?.files?.length) {
+            const file = customInput.files[0];
+            return { structType: 'custom', sizeType: '', key: `custom-${file.name}-${file.lastModified}` };
+        }
         const sizeBtn      = document.querySelector('.sel-btn[data-size].active');
         const structureBtn = document.querySelector('.sel-btn[data-structure].active');
         const structType   = structureBtn?.dataset.structure ?? 'atria';
@@ -865,11 +868,6 @@ window.addEventListener('load', () => {
         vrBtn.textContent = enterLabel;
     }
 
-    // Loading and Taubin-smoothing the structure can take a while. Doing this
-    // ahead of time (rather than inside the VR button's click handler) keeps
-    // the eventual "Enter VR" click free of async work, so the browser still
-    // considers it a fresh user gesture and navigator.xr.requestSession()
-    // doesn't get rejected for lacking user activation.
     let prepareGeneration = 0;
 
     async function prepareStructure() {
@@ -886,13 +884,18 @@ window.addEventListener('load', () => {
         setButtonLoading('Preparing…');
         statusDiv.textContent = 'Loading structure…';
 
-        const PATHS = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
-        const PATH  = PATHS[sizeType] ?? PATHS.small;
-
         try {
-            const structBuf = await fetchWithProgress('Heart structure', PATH);
-            if (myGen !== prepareGeneration) return;
-            const json = JSON.parse(new TextDecoder().decode(structBuf));
+            let json;
+            if (structType === 'custom') {
+                const file = document.getElementById('custom-json').files[0];
+                json = JSON.parse(await file.text());
+            } else {
+                const PATHS = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
+                const PATH  = PATHS[sizeType] ?? PATHS.small;
+                const structBuf = await fetchWithProgress('Heart structure', PATH);
+                if (myGen !== prepareGeneration) return;
+                json = JSON.parse(new TextDecoder().decode(structBuf));
+            }
             const loaded = await loadStructure(json);
             if (myGen !== prepareGeneration) return;
 
@@ -976,9 +979,17 @@ window.addEventListener('load', () => {
         document.querySelectorAll(`.sel-btn[${attr}]`).forEach(btn => {
             btn.addEventListener('click', () => {
                 if (xrSession) return;
+                const customInput = document.getElementById('custom-json');
+                const customClear = document.getElementById('custom-clear');
+                if (customInput) { customInput.value = ''; }
+                if (customClear) { customClear.style.display = 'none'; }
                 prepareStructure();
             });
         });
+    });
+
+    document.getElementById('custom-json')?.addEventListener('change', () => {
+        if (!xrSession) prepareStructure();
     });
 
     prepareStructure();
