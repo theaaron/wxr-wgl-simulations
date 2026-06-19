@@ -318,8 +318,8 @@ export function initVRPanel(glContext) {
 
     buttonLabels['btn_cut'] = 'Cut';
     buttonLabelTextures['btn_cut'] = createTextTexture('Cut');
-    buttonLabels['btn_sim'] = 'Sim Opts';
-    buttonLabelTextures['btn_sim'] = createTextTexture('Sim Opts');
+    buttonLabels['btn_sim'] = 'Sim Options';
+    buttonLabelTextures['btn_sim'] = createTextTexture('Sim Options');
     cutPanelTextures.x_label  = createTextTexture('X',  128, 128);
     cutPanelTextures.y_label  = createTextTexture('Y',  128, 128);
     cutPanelTextures.z_label  = createTextTexture('Z',  128, 128);
