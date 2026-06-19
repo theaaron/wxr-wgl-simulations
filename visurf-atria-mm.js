@@ -229,7 +229,7 @@ function buildAdjacency(struct, texToIdx) {
     return adj;
 }
 
-function taubinSmooth(posData, adjacency, lambda, mu, iterations) {
+async function taubinSmooth(posData, adjacency, lambda, mu, iterations) {
     const src = new Float32Array(posData);
     const dst = new Float32Array(posData.length);
 
@@ -246,9 +246,12 @@ function taubinSmooth(posData, adjacency, lambda, mu, iterations) {
         }
     }
 
+    // Yield to the browser periodically so the page stays responsive (and
+    // any loading spinner keeps animating) during this CPU-heavy pass.
     for (let iter = 0; iter < iterations; iter++) {
         laplacianPass(src, dst, lambda);
         laplacianPass(dst, src, mu);
+        if (iter % 4 === 3) await new Promise(r => requestAnimationFrame(r));
     }
     return src;
 }
@@ -295,7 +298,7 @@ function computeNormalsFromMesh(struct, posData, texToIdx) {
 // ============================================================================
 // BUILD SURFACE BUFFERS
 // ============================================================================
-function buildSurfaceBuffers(struct) {
+async function buildSurfaceBuffers(struct) {
     const { compWidth: cw, compHeight: ch } = struct.metadata;
     const { nx, ny, nz } = struct.dimensions;
     const maxDim = Math.max(nx, ny, nz);
@@ -318,7 +321,7 @@ function buildSurfaceBuffers(struct) {
     }
     const texToIdx = buildTexToIdx(struct);
     const adjacency = buildAdjacency(struct, texToIdx);
-    const smoothedPos = taubinSmooth(posData, adjacency, TAUBIN_LAMBDA, TAUBIN_MU, TAUBIN_ITERATIONS);
+    const smoothedPos = await taubinSmooth(posData, adjacency, TAUBIN_LAMBDA, TAUBIN_MU, TAUBIN_ITERATIONS);
     posTex = mkF32Tex(cw, ch, smoothedPos);
 
     const normalData = computeNormalsFromMesh(struct, smoothedPos, texToIdx);
@@ -825,9 +828,6 @@ window.addEventListener('load', () => {
     gl.canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1';
     document.body.appendChild(gl.canvas);
 
-    statusDiv.textContent = 'Ready';
-
-
     // maybe we want this for both ar and vr? something to keep in mind.
     if (!useAR) {
         const LAB_URL = 'https://pi9k1iia1f4aeulw.public.blob.vercel-storage.com/cath-lab.glb';
@@ -836,98 +836,151 @@ window.addEventListener('load', () => {
             .catch(e => console.warn('Lab model unavailable:', e));
     }
 
-    vrBtn.addEventListener('click', async () => {
-        if (xrSession) { xrSession.end(); return; }
+    const enterLabel = useAR ? 'Enter AR' : 'Enter VR';
+    const centroidVoxel = { x: 0, y: 0, z: 0 };
 
+    window.addEventListener('keydown', e => {
+        if (!structure) return;
+        const { x: kx, y: ky, z: kz } = centroidVoxel;
+        if (e.code === 'Space') { e.preventDefault(); simRunning = !simRunning; if (simRunning && isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
+        else if (e.code === 'KeyE') { if (isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
+        else if (e.code === 'KeyR') { resetSimulation(); simRunning = false; }
+    });
+
+    function getSelectedKey() {
         const sizeBtn      = document.querySelector('.sel-btn[data-size].active');
         const structureBtn = document.querySelector('.sel-btn[data-structure].active');
         const structType   = structureBtn?.dataset.structure ?? 'atria';
         const sizeType     = sizeBtn?.dataset.size ?? 'small';
-        const currentKey   = `${structType}-${sizeType}`;
+        return { structType, sizeType, key: `${structType}-${sizeType}` };
+    }
 
-        if (structure && loadedStructureKey !== currentKey) {
-            structure = null;
-            loadedStructureKey = null;
+    function setButtonLoading(text) {
+        vrBtn.disabled = true;
+        vrBtn.innerHTML = `<span class="spinner"></span>${text}`;
+    }
+
+    function setButtonReady() {
+        vrBtn.disabled = false;
+        vrBtn.textContent = enterLabel;
+    }
+
+    // Loading and Taubin-smoothing the structure can take a while. Doing this
+    // ahead of time (rather than inside the VR button's click handler) keeps
+    // the eventual "Enter VR" click free of async work, so the browser still
+    // considers it a fresh user gesture and navigator.xr.requestSession()
+    // doesn't get rejected for lacking user activation.
+    let prepareGeneration = 0;
+
+    async function prepareStructure() {
+        const { structType, sizeType, key } = getSelectedKey();
+        if (structure && loadedStructureKey === key) {
+            setButtonReady();
+            statusDiv.textContent = 'Ready';
+            return;
         }
 
-        if (!structure) {
-            vrBtn.disabled = true;
-            vrBtn.textContent = 'Loading…';
+        const myGen = ++prepareGeneration;
+        structure = null;
+        loadedStructureKey = null;
+        setButtonLoading('Preparing…');
+        statusDiv.textContent = 'Loading structure…';
 
-            const PATHS = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
-            const PATH  = PATHS[sizeType] ?? PATHS.small;
+        const PATHS = structType === 'ventricle' ? VENTRICLE_PATHS : ATRIA_PATHS;
+        const PATH  = PATHS[sizeType] ?? PATHS.small;
 
-            try {
-                const structBuf = await fetchWithProgress('Heart structure', PATH);
-                const json = JSON.parse(new TextDecoder().decode(structBuf));
-                structure = await loadStructure(json);
-                initCardiacSimulation(gl, structure);
-                initAblation(gl, getAblationParams(), setAblationTexture);
-                buildSurfaceBuffers(structure);
+        try {
+            const structBuf = await fetchWithProgress('Heart structure', PATH);
+            if (myGen !== prepareGeneration) return;
+            const json = JSON.parse(new TextDecoder().decode(structBuf));
+            const loaded = await loadStructure(json);
+            if (myGen !== prepareGeneration) return;
 
-                let sumX = 0, sumY = 0, sumZ = 0;
-                for (const v of structure.voxels) { sumX += v.x; sumY += v.y; sumZ += v.z; }
-                const vn = structure.voxels.length;
-                const centX = sumX / vn, centY = sumY / vn, centZ = sumZ / vn;
+            structure = loaded;
+            initCardiacSimulation(gl, structure);
+            initAblation(gl, getAblationParams(), setAblationTexture);
 
-                let bestDist = Infinity, bestVox = structure.voxels[0];
-                for (const v of structure.voxels) {
-                    const d = (v.x-centX)**2 + (v.y-centY)**2 + (v.z-centZ)**2;
-                    if (d < bestDist) { bestDist = d; bestVox = v; }
-                }
-                const cx = bestVox.x, cy = bestVox.y, cz = bestVox.z;
+            statusDiv.textContent = 'Processing mesh…';
+            await buildSurfaceBuffers(structure);
+            if (myGen !== prepareGeneration) return;
 
-                baseGrabCondition = (hand, wristOrigin, wristDir) => {
-                    const m = getStructureModelMatrix();
-                    const [bx, by, bz] = surfBoundsCenter;
-                    const wCx = m[0]*bx + m[4]*by + m[8]*bz + m[12];
-                    const wCy = m[1]*bx + m[5]*by + m[9]*bz + m[13];
-                    const wCz = m[2]*bx + m[6]*by + m[10]*bz + m[14];
-                    const s   = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2);
-                    const dx = wristOrigin[0] - wCx;
-                    const dy = wristOrigin[1] - wCy;
-                    const dz = wristOrigin[2] - wCz;
-                    return Math.sqrt(dx*dx + dy*dy + dz*dz) < surfBoundsRadius * s * 2.5;
-                };
-                setGrabCondition(baseGrabCondition);
-                setControllerGrabCondition(null);
+            let sumX = 0, sumY = 0, sumZ = 0;
+            for (const v of structure.voxels) { sumX += v.x; sumY += v.y; sumZ += v.z; }
+            const vn = structure.voxels.length;
+            const centX = sumX / vn, centY = sumY / vn, centZ = sumZ / vn;
 
-                setPanelCallbacks({
-                    startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
-                    exitVR:               () => { if (xrSession) xrSession.end(); },
-                    resetView:            () => { resetStructureTransform(); resetSimulation(); resetAblation(); simRunning = false; },
-                    toggleExcitationMode: () => setExcitationMode(!excitationMode),
-                    toggleAblationMode:   () => setAblationMode(!ablationMode),
-                    toggleHints: () => {
-                        const nowEnabled = !areHintsEnabled();
-                        setHintsEnabled(nowEnabled);
-                        updateButtonLabel('btn_1_2', nowEnabled ? 'Hide Hints' : 'Show Hints');
-                    },
-                });
-                setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
-                loadedStructureKey = currentKey;
-
-                window.addEventListener('keydown', e => {
-                    if (!structure) return;
-                    const kx = cx, ky = cy, kz = cz;
-                    if (e.code === 'Space') { e.preventDefault(); simRunning = !simRunning; if (simRunning && isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
-                    else if (e.code === 'KeyE') { if (isSimulationWorking()) exciteAt(kx, ky, kz, 12); }
-                    else if (e.code === 'KeyR') { resetSimulation(); simRunning = false; }
-                });
-            } catch (e) {
-                console.error('Failed to load structure:', e);
-                statusDiv.textContent = 'Load failed: ' + e.message;
-                vrBtn.disabled = false;
-                vrBtn.textContent = useAR ? 'Enter AR' : 'Enter VR';
-                return;
+            let bestDist = Infinity, bestVox = structure.voxels[0];
+            for (const v of structure.voxels) {
+                const d = (v.x-centX)**2 + (v.y-centY)**2 + (v.z-centZ)**2;
+                if (d < bestDist) { bestDist = d; bestVox = v; }
             }
+            centroidVoxel.x = bestVox.x; centroidVoxel.y = bestVox.y; centroidVoxel.z = bestVox.z;
+            const { x: cx, y: cy, z: cz } = centroidVoxel;
 
+            baseGrabCondition = (hand, wristOrigin, wristDir) => {
+                const m = getStructureModelMatrix();
+                const [bx, by, bz] = surfBoundsCenter;
+                const wCx = m[0]*bx + m[4]*by + m[8]*bz + m[12];
+                const wCy = m[1]*bx + m[5]*by + m[9]*bz + m[13];
+                const wCz = m[2]*bx + m[6]*by + m[10]*bz + m[14];
+                const s   = Math.sqrt(m[0]**2 + m[1]**2 + m[2]**2);
+                const dx = wristOrigin[0] - wCx;
+                const dy = wristOrigin[1] - wCy;
+                const dz = wristOrigin[2] - wCz;
+                return Math.sqrt(dx*dx + dy*dy + dz*dz) < surfBoundsRadius * s * 2.5;
+            };
+            setGrabCondition(baseGrabCondition);
+            setControllerGrabCondition(null);
+
+            setPanelCallbacks({
+                startSimulation:      () => { simRunning = !simRunning; if (simRunning) exciteAt(cx, cy, cz, 12); },
+                exitVR:               () => { if (xrSession) xrSession.end(); },
+                resetView:            () => { resetStructureTransform(); resetSimulation(); resetAblation(); simRunning = false; },
+                toggleExcitationMode: () => setExcitationMode(!excitationMode),
+                toggleAblationMode:   () => setAblationMode(!ablationMode),
+                toggleHints: () => {
+                    const nowEnabled = !areHintsEnabled();
+                    setHintsEnabled(nowEnabled);
+                    updateButtonLabel('btn_1_2', nowEnabled ? 'Hide Hints' : 'Show Hints');
+                },
+            });
+            setExciteCallback((x, y, z) => exciteAt(x, y, z, 12));
+            loadedStructureKey = key;
+
+            setButtonReady();
+            statusDiv.textContent = 'Ready';
+        } catch (e) {
+            if (myGen !== prepareGeneration) return;
+            console.error('Failed to load structure:', e);
+            structure = null;
+            loadedStructureKey = null;
+            statusDiv.textContent = 'Load failed: ' + e.message;
             vrBtn.disabled = false;
-            vrBtn.textContent = useAR ? 'Enter AR' : 'Enter VR';
+            vrBtn.textContent = 'Retry';
+        }
+    }
+
+    vrBtn.addEventListener('click', () => {
+        if (xrSession) { xrSession.end(); return; }
+
+        const { key } = getSelectedKey();
+        if (!structure || loadedStructureKey !== key) {
+            prepareStructure();
+            return;
         }
 
         enterVR();
     });
 
+    ['data-structure', 'data-size'].forEach(attr => {
+        document.querySelectorAll(`.sel-btn[${attr}]`).forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (xrSession) return;
+                prepareStructure();
+            });
+        });
+    });
+
+    prepareStructure();
     nonVRLoop();
 });
