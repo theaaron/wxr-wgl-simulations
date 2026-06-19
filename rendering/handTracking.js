@@ -97,6 +97,7 @@ export function updateHandTracking(frame, referenceSpace) {
     rightPinchMidWorld = null;
 
     let sawHand = false;
+    const seenHands = [];
 
     for (const inputSource of frame.session.inputSources) {
         if (!inputSource.hand) continue;
@@ -113,7 +114,12 @@ export function updateHandTracking(frame, referenceSpace) {
 
         if (!thumbTip || !indexTip || !wrist) continue;
 
-        // --- Pinch detection (for grab) ---
+        updateHandControllerPose(hand, wrist.matrix);
+        seenHands.push({ hand, thumbTip, indexTip, indexDistal, middleTip, middleDistal, wrist });
+    }
+
+    for (const { hand, thumbTip, indexTip, indexDistal, middleTip, middleDistal, wrist } of seenHands) {
+
         const pinchDist = dist(thumbTip, indexTip);
         const wasPinching = hand === 'left' ? leftPinching : rightPinching;
         const pinch = wasPinching
@@ -127,8 +133,6 @@ export function updateHandTracking(frame, referenceSpace) {
         const pinchOrigin = midpoint(thumbTip, indexTip);
         if (hand === 'left') leftPinchMidWorld = pinchOrigin;
         else rightPinchMidWorld = pinchOrigin;
-
-        updateHandControllerPose(hand, wristMatrix);
 
         if (pinch && !wasPinching) {
             let allowGrab = true;

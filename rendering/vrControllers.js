@@ -124,7 +124,7 @@ void main() {
 `;
 
 export function initVRControllers(gl) {
-    console.log('🎮 Initializing VR controllers...');
+    console.log('Initializing VR controllers...');
 
     createRayCylinderGeometry(gl);
     rayProgram = createRayProgram(gl);
@@ -133,11 +133,11 @@ export function initVRControllers(gl) {
     vrButtonProgram = createVRButtonProgram(gl);
 
     if (rayProgram && vrButtonProgram) {
-        console.log('✅ VR controller ray system initialized');
-        console.log('✅ VR UI button initialized');
+        console.log('VR controller ray system initialized');
+        console.log('VR UI button initialized');
         return true;
     } else {
-        console.error('❌ Failed to initialize VR controller system');
+        console.error('Failed to initialize VR controller system');
         return false;
     }
 }

@@ -106,6 +106,8 @@ let panelGrab = {
     orientAtGrab: null,
 };
 
+let prevGrabHeld = { left: false, right: false };
+
 let callbacks = {};
 
 let panelMode = 'normal';
@@ -319,6 +321,8 @@ function createQuadGeometry() {
     buttonBuffer = panelBuffer;
     buttonIndexBuffer = panelIndexBuffer;
 }
+
+const TEXT_TEXTURE_ASPECT = 256 / 128;
 
 function createTextTexture(text, w = 256, h = 128) {
     const canvas = document.createElement('canvas');
@@ -639,6 +643,10 @@ export function updatePanelGrab(
     pinchWorldLeft = null,
     pinchWorldRight = null
 ) {
+    const wasGrabHeld = { left: prevGrabHeld.left, right: prevGrabHeld.right };
+    prevGrabHeld.left = leftSqueezing || leftPinching;
+    prevGrabHeld.right = rightSqueezing || rightPinching;
+
     if (panelGrab.active) {
         const hand = panelGrab.hand;
         const ctrl = hand === 'left' ? leftCtrl : rightCtrl;
@@ -672,14 +680,12 @@ export function updatePanelGrab(
     }
 
     const candidates = [
-        { hand: 'left', ctrl: leftCtrl, squeezing: leftSqueezing, pinching: leftPinching, pinch: pinchWorldLeft },
-        { hand: 'right', ctrl: rightCtrl, squeezing: rightSqueezing, pinching: rightPinching, pinch: pinchWorldRight },
+        { hand: 'left', ctrl: leftCtrl, squeezing: leftSqueezing, pinching: leftPinching, pinch: pinchWorldLeft, isNewGrab: (leftSqueezing || leftPinching) && !wasGrabHeld.left },
+        { hand: 'right', ctrl: rightCtrl, squeezing: rightSqueezing, pinching: rightPinching, pinch: pinchWorldRight, isNewGrab: (rightSqueezing || rightPinching) && !wasGrabHeld.right },
     ];
 
     for (const c of candidates) {
-        if (!c.ctrl) continue;
-        const grabbing = c.squeezing || c.pinching;
-        if (!grabbing) continue;
+        if (!c.ctrl || !c.isNewGrab) continue;
 
         let onTablet = false;
         let grabAnchor = c.ctrl.origin;
@@ -775,7 +781,13 @@ export function renderVRPanel(projectionMatrix, viewMatrix) {
                 if (!btn) continue;
                 gl.bindTexture(gl.TEXTURE_2D, tex);
                 gl.uniform3fv(gl.getUniformLocation(textProgram, 'u_offset'), [btn.x, btn.y, 0]);
-                gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [btn.width * 0.85, btn.height * 0.55]);
+
+                const maxW = btn.width * 0.85;
+                const maxH = btn.height * 0.55;
+                let textH = maxH;
+                let textW = textH * TEXT_TEXTURE_ASPECT;
+                if (textW > maxW) { textW = maxW; textH = textW / TEXT_TEXTURE_ASPECT; }
+                gl.uniform2fv(gl.getUniformLocation(textProgram, 'u_size'), [textW, textH]);
                 gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
